@@ -110,6 +110,8 @@ async function streamOnce({ messages, toolSchemas, temperature, maxTokens, think
       if (streamStarted) onStream?.({ event: 'end' })
       return { content: fullContent, toolCalls: Object.values(toolCallsMap), aborted: true }
     }
+    err.hadContent = fullContent.length > 0
+    if (streamStarted) onStream?.({ event: 'end' })
     throw err
   }
 
@@ -120,6 +122,50 @@ async function streamOnce({ messages, toolSchemas, temperature, maxTokens, think
   }
 
   return { content: fullContent, toolCalls: Object.values(toolCallsMap), aborted: false }
+}
+
+// 判断是否为瞬时错误（5xx / 网络抖动 / 超时），429 交给外层 setRateLimited
+function isTransientError(err) {
+  const status = err.status ?? err.response?.status
+  if (status && status >= 500 && status < 600) return true
+  if (status === 408) return true
+  const code = err.code || err.cause?.code
+  if (code && ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE'].includes(code)) return true
+  const msg = err.message || ''
+  return /timeout|timed out|socket hang up|fetch failed|network error|upstream/i.test(msg)
+}
+
+function abortableSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
+    const timer = setTimeout(resolve, ms)
+    const onAbort = () => { clearTimeout(timer); reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })) }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+// 包装 streamOnce：对瞬时错误做有限次退避重试；已流出内容时不重试避免 UI 重复
+async function streamOnceWithRetry(args) {
+  const BACKOFFS_MS = [800, 2500]
+  const MAX_ATTEMPTS = BACKOFFS_MS.length + 1
+  let lastErr
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' })
+    try {
+      return await streamOnce(args)
+    } catch (err) {
+      if (err.name === 'AbortError' || args.signal?.aborted) throw err
+      if (err.hadContent) throw err
+      if (!isTransientError(err)) throw err
+      lastErr = err
+      if (attempt < MAX_ATTEMPTS - 1) {
+        const delay = BACKOFFS_MS[attempt]
+        console.warn(`[LLM] 瞬时错误 "${(err.message || '').slice(0, 80)}"，${delay}ms 后第 ${attempt + 2} 次尝试`)
+        await abortableSleep(delay, args.signal)
+      }
+    }
+  }
+  throw lastErr
 }
 
 // XML 格式工具调用的参数名别名映射（某些模型使用不同参数名）
@@ -189,7 +235,7 @@ export async function callLLM({ systemPrompt, message, temperature = 0.7, tools 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal?.aborted) break
 
-    const { content, toolCalls, aborted } = await streamOnce({
+    const { content, toolCalls, aborted } = await streamOnceWithRetry({
       messages,
       toolSchemas,
       temperature,

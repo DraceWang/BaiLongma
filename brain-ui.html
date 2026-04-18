@@ -829,7 +829,6 @@ body {
 <script>
 const API = "http://localhost:3721";
 const THEME_KEY = "jarvis-brain-ui-theme";
-const CHAT_STORAGE_KEY = "jarvis-brain-ui-chat-history";
 const PHYSICS_STORAGE_KEY = "jarvis-brain-ui-physics";
 const MAX_CHAT_HISTORY = 60;
 
@@ -846,7 +845,7 @@ const nodeSizeValue = document.getElementById("node-size-value");
 
 const physicsSettings = {
   gravity: 1,
-  repulsion: 1,
+  repulsion: 1.35,
   nodeSize: 1,
 };
 
@@ -1038,7 +1037,7 @@ function highlightNodes(nids, duration = 2400) {
     usePulseSet.set(key, { start: now, end: expiry });
   });
   refreshNodeVisuals();
-  sim.alpha(Math.max(sim.alpha(), 0.3)).restart();
+  sim.alpha(Math.max(sim.alpha(), 2)).restart();
   setTimeout(() => {
     nids.forEach(nid => {
       const key = String(nid);
@@ -1105,8 +1104,8 @@ const sim = d3.forceSimulation()
   .force("y", d3.forceY(H / 2 - 10))
   .force("radial", d3.forceRadial(180, W / 2, H / 2 - 10))
   .force("collision", d3.forceCollide())
-  .alphaDecay(0.015)
-  .velocityDecay(0.22)
+  .alphaDecay(0.02)
+  .velocityDecay(0.3)
   .on("tick", tick);
 
 function linkDistance(link) {
@@ -1124,17 +1123,17 @@ function linkStrength(link) {
 
 function chargeStrength(node) {
   const countBoost = Math.min(76, Math.sqrt(Math.max(1, nodeData.length)) * 3.5);
-  const baseCharge = -72 - countBoost * 0.32 - (node._deg || 0) * 2 - (node._childCount || 0) * 1;
+  const baseCharge = -92 - countBoost * 0.4 - (node._deg || 0) * 2.4 - (node._childCount || 0) * 1.2;
   return baseCharge * physicsSettings.repulsion;
 }
 
 function radialStrength() {
-  const baseSpread = nodeData.length > 36 ? 0.01 : 0.016;
+  const baseSpread = nodeData.length > 36 ? 0.1 : 0.1;
   return baseSpread * physicsSettings.gravity;
 }
 
 function centerPullStrength() {
-  const basePull = nodeData.length > 36 ? 0.06 : 0.085;
+  const basePull = nodeData.length > 36 ? 0.04 : 0.055;
   return basePull * physicsSettings.gravity;
 }
 
@@ -1171,7 +1170,7 @@ function updateSimulationForces() {
     .iterations(nodeData.length > 40 ? 2 : 1);
 }
 
-function applyPhysicsSettings(restartAlpha = 0.3) {
+function applyPhysicsSettings(restartAlpha = 2) {
   updatePhysicsReadout();
   updateSimulationForces();
   refreshNodeVisuals();
@@ -1188,7 +1187,79 @@ function refreshNodeVisuals() {
     .style("animation", d => nodeUseProgress(d._nid) > 0 ? "neb-node-use 10s ease-out" : null);
 }
 
+function dampTangentialMotion() {
+  const cx = W / 2;
+  const cy = H / 2 - 10;
+  const twitching = sim.alpha() > 0.45;
+
+  nodeData.forEach(node => {
+    if (!node || node.fx != null || node.fy != null) return;
+
+    const dx = (node.x ?? cx) - cx;
+    const dy = (node.y ?? cy) - cy;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.001) return;
+
+    const rx = dx / dist;
+    const ry = dy / dist;
+    const tx = -ry;
+    const ty = rx;
+    const vx = node.vx || 0;
+    const vy = node.vy || 0;
+    const radialVelocity = vx * rx + vy * ry;
+    const tangentialVelocity = vx * tx + vy * ty;
+    const tangentialDamping = twitching ? 0.14 : 0.24;
+
+    node.vx = radialVelocity * rx + tangentialVelocity * tangentialDamping * tx;
+    node.vy = radialVelocity * ry + tangentialVelocity * tangentialDamping * ty;
+  });
+}
+
+function naturalTwitch() {
+  if (nodeData.length < 2) {
+    sim.alpha(0.55).restart();
+    return;
+  }
+
+  const nodeById = new Map(nodeData.map(node => [String(node._nid), node]));
+  const anchorMap = new Map();
+  linkData.forEach(link => {
+    if (link._kind !== "visual_parent" && link._kind !== "visual_random") return;
+    const sourceId = typeof link.source === "object" ? String(link.source._nid) : String(link.source);
+    const targetId = typeof link.target === "object" ? String(link.target._nid) : String(link.target);
+    if (!anchorMap.has(sourceId) && nodeById.has(targetId)) {
+      anchorMap.set(sourceId, nodeById.get(targetId));
+    }
+  });
+
+  const twitchCount = Math.max(6, Math.floor(nodeData.length * 0.3));
+  const candidates = shuffleArray(nodeData.filter(node => !node._core)).slice(0, twitchCount);
+
+  candidates.forEach(node => {
+    const anchor = anchorMap.get(String(node._nid)) || nodeData[deterministicIndex(node._nid, nodeData.length)];
+    if (!anchor) return;
+
+    const anchorX = anchor.x ?? (W / 2);
+    const anchorY = anchor.y ?? (H / 2 - 10);
+    const angle = Math.random() * Math.PI * 2;
+    const offset = 36 + Math.random() * 52;
+    const nextX = anchorX + Math.cos(angle) * offset;
+    const nextY = anchorY + Math.sin(angle) * offset;
+    const currentX = node.x ?? nextX;
+    const currentY = node.y ?? nextY;
+
+    node.x = currentX * 0.7 + nextX * 0.3;
+    node.y = currentY * 0.7 + nextY * 0.3;
+    node.vx = (node.vx || 0) + (nextX - currentX) * 0.14;
+    node.vy = (node.vy || 0) + (nextY - currentY) * 0.14;
+  });
+
+  sim.alpha(0.85).restart();
+}
+
 function tick() {
+  dampTangentialMotion();
+
   linkSel
     .attr("x1", d => d.source.x)
     .attr("y1", d => d.source.y)
@@ -1295,7 +1366,7 @@ function renderLegend() {
   ).join("");
 }
 
-function renderGraph(restartAlpha = 1.2) {
+function renderGraph(restartAlpha = 2) {
   computeDegrees();
   markCore();
   updateStats();
@@ -1317,7 +1388,7 @@ function renderGraph(restartAlpha = 1.2) {
     .style("cursor", "pointer")
     .call(d3.drag()
       .on("start", (event, d) => {
-        if (!event.active) sim.alphaTarget(0.3).restart();
+        if (!event.active) sim.alphaTarget(2).restart();
         d.fx = d.x; d.fy = d.y;
       })
       .on("drag", (event, d) => {
@@ -1345,7 +1416,7 @@ function renderGraph(restartAlpha = 1.2) {
   sim.nodes(nodeData);
   sim.force("link").links(linkData);
   updateSimulationForces();
-  sim.alpha(restartAlpha).restart();
+  sim.alpha(0.5).restart();
   refreshNodeVisuals();
 }
 
@@ -1379,10 +1450,12 @@ function chooseVisualParent(child, candidates, childCounts) {
   const weighted = [];
   candidates.forEach(candidate => {
     const currentChildren = childCounts.get(candidate._nid) || 0;
+    const maxChildren = maxVisualChildren(candidate);
     const recencyBias = Math.max(0, 400000 - Math.abs((child._ts || 0) - (candidate._ts || 0))) / 100000;
     const coreBias = candidate._core ? 1.4 : 0;
     const strengthBias = (candidate._strength || 0.4) * 0.8;
-    const capacityBias = currentChildren === 0 ? 1.2 : 0.35;
+    const remainingCapacity = Math.max(0, maxChildren - currentChildren);
+    const capacityBias = currentChildren === 0 ? 1.2 : 0.35 + remainingCapacity * 0.25;
     const entryCount = 1 + Math.max(0, Math.round((recencyBias + coreBias + strengthBias + capacityBias) * 2));
     for (let w = 0; w < entryCount; w++) {
       weighted.push(candidate);
@@ -1402,6 +1475,44 @@ function getCurrentVisualChildCounts(nodes) {
   return counts;
 }
 
+function maxVisualChildren(node) {
+  if (!node) return 2;
+  if (node._core) return 4;
+  const degree = node._deg || 0;
+  const strength = node._strength || 0;
+  return (degree >= 4 || strength >= 0.72) ? 4 : 2;
+}
+
+function addSupplementalVisualLinks(linkSet, childCounts) {
+  const ordered = createVisualOrder(nodeData);
+  const extraLinks = Math.min(18, Math.max(2, Math.floor(nodeData.length / 5)));
+  let added = 0;
+
+  for (let i = 1; i < ordered.length && added < extraLinks; i++) {
+    const source = ordered[i];
+    const candidates = shuffleArray(
+      ordered.slice(0, i).filter(node => {
+        if (node._nid === source._nid) return false;
+        return (childCounts.get(node._nid) || 0) < maxVisualChildren(node);
+      })
+    );
+
+    const target = candidates[0];
+    if (!target) continue;
+
+    const lid = `visual-extra:${source._nid}=>${target._nid}`;
+    const rev = `visual-extra:${target._nid}=>${source._nid}`;
+    const base = `visual:${source._nid}=>${target._nid}`;
+    const baseRev = `visual:${target._nid}=>${source._nid}`;
+    if (linkSet.has(lid) || linkSet.has(rev) || linkSet.has(base) || linkSet.has(baseRev)) continue;
+
+    linkSet.add(lid);
+    linkData.push({ source: source._nid, target: target._nid, _lid: lid, _kind: "visual_random" });
+    childCounts.set(target._nid, (childCounts.get(target._nid) || 0) + 1);
+    added += 1;
+  }
+}
+
 function addRandomVisualLinks(linkSet) {
   if (nodeData.length < 2) return;
 
@@ -1412,7 +1523,7 @@ function addRandomVisualLinks(linkSet) {
     const child = ordered[i];
     const candidates = ordered
       .slice(0, i)
-      .filter(node => (childCounts.get(node._nid) || 0) < 2);
+      .filter(node => (childCounts.get(node._nid) || 0) < maxVisualChildren(node));
 
     const parent = chooseVisualParent(child, candidates, childCounts);
     if (!parent || parent._nid === child._nid) continue;
@@ -1425,13 +1536,15 @@ function addRandomVisualLinks(linkSet) {
     linkData.push({ source: child._nid, target: parent._nid, _lid: lid, _kind: "visual_parent" });
     childCounts.set(parent._nid, (childCounts.get(parent._nid) || 0) + 1);
   }
+
+  addSupplementalVisualLinks(linkSet, childCounts);
 }
 
 function findAnchorNode(memory, nodeMap) {
   const nodes = Array.from(nodeMap.values());
   const childCounts = getCurrentVisualChildCounts(nodes);
   const candidates = createVisualOrder(nodes)
-    .filter(node => (childCounts.get(node._nid) || 0) < 2);
+    .filter(node => (childCounts.get(node._nid) || 0) < maxVisualChildren(node));
   return chooseVisualParent(memory, candidates, childCounts)
     || nodeData.find(n => n._core)
     || nodeData[0]
@@ -1454,8 +1567,8 @@ async function loadMemories() {
         ...row,
         _nid: nid,
         _ts: prev ? Date.now() : Date.now() - Math.random() * 8000,
-        x: prev ? prev.x : W / 2 + (Math.random() - 0.5) * 120,
-        y: prev ? prev.y : H / 2 + (Math.random() - 0.5) * 120,
+        x: prev ? prev.x : W / 2 + (Math.random() - 0.5) * 180,
+        y: prev ? prev.y : H / 2 + (Math.random() - 0.5) * 180,
         vx: prev ? prev.vx : 0,
         vy: prev ? prev.vy : 0,
         fx: prev ? prev.fx : null,
@@ -1490,8 +1603,8 @@ function addNewNodes(memories) {
       event_type: memory.event_type || memory.type || "fact",
       _ts: Date.now(),
       _strength: 0.85,
-      x: anchorX + (Math.random() - 0.5) * 44,
-      y: anchorY + (Math.random() - 0.5) * 44,
+      x: anchorX + (Math.random() - 0.5) * 72,
+      y: anchorY + (Math.random() - 0.5) * 72,
       vx: 0, vy: 0,
     };
     nodeData.push(node);
@@ -1503,11 +1616,11 @@ function addNewNodes(memories) {
   const linkSet = new Set();
   linkData = [];
   addRandomVisualLinks(linkSet);
-  renderGraph(0.55);
-  highlightNodes(newNids, 3500);
+  renderGraph(2);
+  highlightNodes(newNids, 10000);
 }
 
-setInterval(() => sim.alpha(2).restart(), 3000);
+setInterval(() => naturalTwitch(), 3000);
 setInterval(() => { nodeData.forEach(n => { if (n._strength) n._strength *= 0.97; }); }, 2500);
 
 class ThoughtStream {
@@ -1640,7 +1753,7 @@ function handle({ type, data = {} }) {
       break;
     case "layer1_injector_result": {
       const nids = extractNids(data.matchedMemories);
-      if (nids.length) highlightNodes(nids, 30000);
+      if (nids.length) highlightNodes(nids, 10000);
       break;
     }
     case "layer2_start":
@@ -1658,7 +1771,7 @@ function handle({ type, data = {} }) {
       break;
     case "injector_result": {
       const nids = [...extractNids(data.matchedMemories), ...extractNids(data.recallMemories)];
-      if (nids.length) highlightNodes(nids, 30000);
+      if (nids.length) highlightNodes(nids, 10000);
       break;
     }
     case "memories_written":
@@ -1732,29 +1845,16 @@ function isTyping() {
   return document.activeElement === msgInput || msgInput.value.trim().length > 0;
 }
 
-function loadStoredChatHistory() {
+async function fetchChatHistory() {
   try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(i =>
-      i && (i.role === "user" || i.role === "jarvis") && typeof i.text === "string"
-    ).slice(-MAX_CHAT_HISTORY);
+    const res = await fetch(`${API}/conversations?limit=${MAX_CHAT_HISTORY}`);
+    if (!res.ok) return [];
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .filter(r => r && (r.role === "user" || r.role === "jarvis") && typeof r.content === "string")
+      .map(r => ({ role: r.role, text: r.content }));
   } catch { return []; }
-}
-
-function saveStoredChatHistory() {
-  try {
-    const history = Array.from(chatMessages.children).map(n => ({
-      role: n.classList.contains("msg-user") ? "user" : "jarvis",
-      text: Array.from(n.childNodes)
-        .filter(c => c.nodeType === Node.TEXT_NODE)
-        .map(c => c.textContent || "")
-        .join(""),
-    })).slice(-MAX_CHAT_HISTORY);
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(history));
-  } catch {}
 }
 
 function openChat(autoClose = false) {
@@ -1787,7 +1887,7 @@ msgInput.addEventListener("input", () => {
 });
 
 function addMsg(role, text, options = {}) {
-  const { persist = true, alert = role === "jarvis", pending = true } = options;
+  const { alert = role === "jarvis", pending = true } = options;
   const div = document.createElement("div");
   div.className = `msg msg-${role}`;
   div.innerHTML = `<span class="msg-label">${role === "user" ? "You" : "Jarvis"}</span>`;
@@ -1809,11 +1909,10 @@ function addMsg(role, text, options = {}) {
   }
 
   chatMessages.scrollTop = chatMessages.scrollHeight;
-  if (persist) saveStoredChatHistory();
 }
 
-function restoreChatHistory() {
-  const history = loadStoredChatHistory();
+async function restoreChatHistory() {
+  const history = await fetchChatHistory();
   history.forEach(i => addMsg(i.role, i.text, { persist: false, alert: false, pending: false }));
   if (history.length) {
     pendingMessageDismissed = true;
@@ -1882,7 +1981,7 @@ window.addEventListener("resize", () => {
      .force("y", d3.forceY(H / 2 - 10))
      .force("radial", d3.forceRadial(180, W / 2, H / 2 - 10));
   updateSimulationForces();
-  sim.alpha(0.4).restart();
+  sim.alpha(5).restart();
 });
 
 d3.timer(() => {

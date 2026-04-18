@@ -27,6 +27,11 @@ export function popMessage() {
   return queue.shift() || null
 }
 
+// 把消息重新放回队列头部（LLM 失败后重试用），保留原始字段并带上 retryCount
+export function requeueMessage(msg, retryCount) {
+  queue.unshift({ ...msg, retryCount })
+}
+
 export function hasMessages() {
   return queue.length > 0
 }

@@ -3,6 +3,10 @@ import { buildLayer1Prompt } from './prompt.js'
 import { runInjector, formatMemoriesForPrompt } from './memory/injector.js'
 import { emitEvent } from './events.js'
 import { setRateLimited } from './quota.js'
+import { getMemoryByMemId } from './db.js'
+
+// 身份记忆的语义 ID（与 seed-memories.js 中 my_definition 对齐）
+const IDENTITY_MEM_ID = 'my_definition'
 
 // 一层思考器只允许使用信息收集类工具
 const L1_TOOLS = ['read_file', 'list_dir', 'fetch_url', 'search_memory']
@@ -26,15 +30,10 @@ export async function runLayer1({ input, state, sessionRef, signal }) {
   emitEvent('layer1_start', { input: input.slice(0, 200) })
 
   // 1. 注入器：为一层思考器准备记忆和方向
+  // 注意：念头栈的更新由调用方（process）负责，避免 L1+L2 双推
   const injection = await runInjector({ message: input, state })
   const memoriesText = formatMemoriesForPrompt(injection.memories, injection.recallMemories)
   const directionsText = injection.directions.join('\n')
-
-  // 更新念头栈
-  if (injection.thought) {
-    state.thoughtStack.push(injection.thought)
-    if (state.thoughtStack.length > 3) state.thoughtStack.shift()
-  }
 
   emitEvent('layer1_injector_result', {
     directions: injection.directions,
@@ -58,8 +57,11 @@ export async function runLayer1({ input, state, sessionRef, signal }) {
     thought: injection.thought || null,
   })
 
-  // 2. 构建一层思考器提示词
+  // 2. 构建一层思考器提示词（身份从记忆库读取，允许 Agent 后期自改）
+  const identityMem = getMemoryByMemId(IDENTITY_MEM_ID)
+  const identity = identityMem?.content || ''
   const systemPrompt = buildLayer1Prompt({
+    identity,
     memories: memoriesText,
     directions: directionsText,
     constraints: injection.constraints || [],

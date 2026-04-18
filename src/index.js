@@ -1,11 +1,12 @@
 import { config } from './config.js'
 import { callLLM } from './llm.js'
+import { runLayer1 } from './layer1.js'
 import { buildSystemPrompt } from './prompt.js'
 import { runRecognizer } from './memory/recognizer.js'
 import { runInjector, formatMemoriesForPrompt, formatTaskKnowledge } from './memory/injector.js'
 import { gatherContext, formatExtraContext } from './context/gatherer.js'
 import { getDB, getConfig, setConfig, getKnownEntities, getOrInitBirthTime, insertConversation, insertMemory } from './db.js'
-import { popMessage, hasMessages, setInterruptCallback } from './queue.js'
+import { popMessage, hasMessages, setInterruptCallback, requeueMessage } from './queue.js'
 import { startTUI } from './tui.js'
 import { startAPI } from './api.js'
 import { emitEvent } from './events.js'
@@ -67,18 +68,97 @@ function buildToolContext(label, injection) {
   }
 }
 
-async function process(input, label) {
+const MAX_MESSAGE_RETRIES = 3
+
+// LLM 失败后的通用处理：429 设限流，消息重入队列，超限放弃
+function handleLLMFailure(err, label, msg) {
+  console.error('LLM 调用失败:', err.message)
+  if (err.message?.includes('429') || err.status === 429) setRateLimited()
+  emitEvent('error', { label, error: err.message })
+  if (msg) {
+    const nextRetry = (msg.retryCount || 0) + 1
+    if (nextRetry <= MAX_MESSAGE_RETRIES) {
+      console.log(`[系统] 消息重入队列（第 ${nextRetry}/${MAX_MESSAGE_RETRIES} 次重试）`)
+      emitEvent('message_requeued', { fromId: msg.fromId, retryCount: nextRetry, error: err.message })
+      requeueMessage(msg, nextRetry)
+    } else {
+      console.error(`[系统] 消息重试 ${MAX_MESSAGE_RETRIES} 次仍失败，放弃：${msg.content?.slice(0, 60)}`)
+      emitEvent('message_dropped', { fromId: msg.fromId, retryCount: nextRetry - 1, reason: err.message })
+    }
+  }
+}
+
+async function process(input, label, msg = null) {
   const sessionRef = newSessionRef()
   const isTick = label === 'TICK' || label.startsWith('TICK ')
+  const isFirstAttempt = !msg || !msg.retryCount
 
   console.log(`\n── ${label} ──`)
   emitEvent(isTick ? 'tick' : 'message_received', { label, input: input.slice(0, 300) })
 
-  // 记录用户消息（非 TICK）
-  if (!isTick) {
+  // 记录用户消息（非 TICK，且是第一次处理；重试时不重复写入会话记录）
+  if (!isTick && isFirstAttempt) {
     const fromMatch = label.match(/消息 from (.+)/)
     const fromId = fromMatch ? fromMatch[1] : 'unknown'
     insertConversation({ role: 'user', from_id: fromId, content: input, timestamp: nowTimestamp() })
+  }
+
+  // ── L1 预思考：收到他者消息时先过一层思考器，能直接回就短回复，不然交给 L2 ──
+  currentAbortController = new AbortController()
+  let l1ThoughtPushed = false
+
+  if (!isTick && msg && msg.fromId && msg.fromId !== 'jarvis') {
+    let l1
+    try {
+      l1 = await runLayer1({ input, state, sessionRef, signal: currentAbortController.signal })
+    } catch (err) {
+      handleLLMFailure(err, `L1 ${label}`, msg)
+      currentAbortController = null
+      return
+    }
+
+    if (l1.injection?.thought) {
+      state.thoughtStack.push(l1.injection.thought)
+      if (state.thoughtStack.length > 3) state.thoughtStack.shift()
+      l1ThoughtPushed = true
+    }
+
+    if (l1.aborted) {
+      console.log('[系统] L1 被打断')
+      await runRecognizer({
+        userMessage: input, jarvisThink: '', jarvisResponse: l1.content || '',
+        toolCallLog: l1.toolCallLog || [], task: state.task, sessionRef,
+      })
+      currentAbortController = null
+      return
+    }
+
+    if (l1.mode === 'final_reply' && l1.content.trim()) {
+      const targetId = msg.fromId
+      const content = l1.content.trim()
+      const timestamp = nowTimestamp()
+
+      insertConversation({ role: 'jarvis', from_id: 'jarvis', to_id: targetId, content, timestamp })
+      emitEvent('message', { from: 'consciousness', to: targetId, content, timestamp })
+      emitEvent('response', { sessionRef, label, content })
+      console.log(`\nJarvis (L1): ${content}`)
+
+      state.recentActions.push({ ts: timestamp, summary: `send_message → ${targetId}` })
+      if (state.recentActions.length > 5) state.recentActions.shift()
+
+      const toolCallLog = [
+        ...(l1.toolCallLog || []),
+        { name: 'send_message', args: { target_id: targetId, content }, result: `消息已发送至 ${targetId}` },
+      ]
+      const memories = await runRecognizer({
+        userMessage: input, jarvisThink: '', jarvisResponse: content,
+        toolCallLog, task: state.task, sessionRef,
+      })
+      emitEvent('memories_written', { count: memories?.length || 0, memories: memories || [] })
+      currentAbortController = null
+      return
+    }
+    // next_thinker：继续走 L2 流程，controller 保留
   }
 
   // 1. 注入器
@@ -134,8 +214,8 @@ async function process(input, label) {
       : null,
   })
 
-  // 更新念头栈（新念头入栈，超过3个时出栈）
-  if (injection.thought) {
+  // 更新念头栈（若 L1 已推入则跳过，避免同一条消息双推）
+  if (injection.thought && !l1ThoughtPushed) {
     state.thoughtStack.push(injection.thought)
     if (state.thoughtStack.length > 3) state.thoughtStack.shift()
   }
@@ -165,11 +245,11 @@ async function process(input, label) {
   // 发出完整系统提示词事件
   emitEvent('system_prompt', { content: systemPrompt })
 
-  // 3. 调用 Jarvis LLM（可被新消息打断）
+  // 3. 调用 Jarvis LLM（可被新消息打断；controller 在 L1 阶段或此处已初始化）
   const toolCallLog = []
   let llmResult
   const toolContext = buildToolContext(label, injection)
-  currentAbortController = new AbortController()
+  if (!currentAbortController) currentAbortController = new AbortController()
   try {
     llmResult = await callLLM({
       systemPrompt,
@@ -204,12 +284,8 @@ async function process(input, label) {
       // 仍需运行识别器，将部分结果存入记忆
       llmResult = { content: '', toolResult: null, aborted: true }
     } else {
-      console.error('LLM 调用失败:', err.message)
-      if (err.message?.includes('429') || err.status === 429) {
-        setRateLimited()
-      }
-      emitEvent('error', { label, error: err.message })
       currentAbortController = null
+      handleLLMFailure(err, label, msg)
       return
     }
   } finally {
@@ -320,7 +396,7 @@ async function onTick() {
   try {
     if (hasMessages()) {
       const msg = popMessage()
-      await process(msg.raw, `消息 from ${msg.fromId}`)
+      await process(msg.raw, `消息 from ${msg.fromId}`, msg)
     } else {
       const tick = formatTick()
       await process(tick, 'TICK')
@@ -335,7 +411,7 @@ function scheduleNextTick() {
   if (!isRunning()) return
   const hasPending = hasMessages()
   const taskActive = !!state.task
-  const interval = hasPending ? 0 : (taskActive ? 2000 : getAdaptiveTickInterval(config.tickInterval))
+  const interval = hasPending ? 0 : (taskActive ? 2000 : config.tickInterval)
   const quota = getQuotaStatus()
   const label = hasPending ? '立即（消息待处理）' : (taskActive ? `任务模式 2s` : `${interval / 1000}s`)
   console.log(`[配额] ${quota.rpmUsed} RPM | ${quota.tpmUsed} TPM | 占用 ${quota.ratio} | 下次 Tick ${label}`)

@@ -302,6 +302,12 @@ function ensureCanonicalIdentityRoot(entityId) {
   return result.lastInsertRowid
 }
 
+// 按语义 mem_id 读取单条记忆（用于 Agent 可自改的身份/人格类根记忆）
+export function getMemoryByMemId(memId) {
+  const db = getDB()
+  return db.prepare('SELECT id, mem_id, event_type, title, content, detail FROM memories WHERE mem_id = ? LIMIT 1').get(memId) || null
+}
+
 // 读取配置
 export function getConfig(key) {
   const db = getDB()

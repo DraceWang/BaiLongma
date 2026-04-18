@@ -99,6 +99,20 @@ export function startAPI(port = 3721) {
       return
     }
 
+    // GET /conversations?limit=60 — 聊天记录（按时间升序，最新的在最后）
+    if (req.method === 'GET' && url.pathname === '/conversations') {
+      const db = getDB()
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '60'), 500)
+      const rows = db.prepare(`
+        SELECT id, role, from_id, to_id, content, timestamp
+        FROM conversations
+        ORDER BY id DESC
+        LIMIT ?
+      `).all(limit)
+      jsonResponse(res, 200, rows.reverse())
+      return
+    }
+
     // GET /status
     if (req.method === 'GET' && url.pathname === '/status') {
       const db = getDB()
