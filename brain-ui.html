@@ -446,6 +446,9 @@ body {
   line-height: 1.55;
   word-break: break-word;
   border: 1px solid var(--line);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .msg-user {
@@ -475,6 +478,94 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   opacity: 0.65;
+}
+
+.msg-body,
+.msg-body * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.msg-body > * + * {
+  margin-top: 0.55em;
+}
+
+.msg-body p {
+  margin: 0;
+  white-space: normal;
+}
+
+.msg-body h1,
+.msg-body h2,
+.msg-body h3,
+.msg-body h4,
+.msg-body h5,
+.msg-body h6 {
+  margin: 0;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.msg-body h1 { font-size: 1.28em; }
+.msg-body h2 { font-size: 1.18em; }
+.msg-body h3 { font-size: 1.1em; }
+.msg-body h4,
+.msg-body h5,
+.msg-body h6 { font-size: 1em; }
+
+.msg-body ul,
+.msg-body ol {
+  margin: 0;
+  padding-left: 1.3em;
+}
+
+.msg-body li + li {
+  margin-top: 0.2em;
+}
+
+.msg-body blockquote {
+  margin: 0;
+  padding-left: 0.8em;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink2);
+}
+
+.msg-body code {
+  padding: 0.08em 0.36em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg0) 68%, transparent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.95em;
+}
+
+.msg-body pre {
+  margin: 0;
+  padding: 0.7em 0.85em;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg0) 82%, transparent);
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.msg-body pre code {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.msg-body a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-underline-offset: 0.16em;
+}
+
+.msg-body strong {
+  font-weight: 700;
+}
+
+.msg-body em {
+  font-style: italic;
 }
 
 #input-row {
@@ -1921,6 +2012,168 @@ msgInput.addEventListener("input", () => {
   else if (!hasPendingJarvisMessage || pendingMessageDismissed) scheduleClose();
 });
 
+function escapeHtml(text) {
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeAttr(text) {
+  return escapeHtml(text).replace(/`/g, "&#96;");
+}
+
+function safeHref(rawUrl) {
+  const url = String(rawUrl ?? "").trim();
+  if (!url) return "";
+  if (/^(https?:|mailto:)/i.test(url)) return url;
+  if (url.startsWith("/") || url.startsWith("#")) return url;
+  return "";
+}
+
+function renderInlineMarkdown(text) {
+  const codeTokens = [];
+  let html = String(text ?? "").replace(/`([^`]+)`/g, (_, code) => {
+    const token = `@@CODE_${codeTokens.length}@@`;
+    codeTokens.push(`<code>${escapeHtml(code)}</code>`);
+    return token;
+  });
+
+  html = escapeHtml(html);
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, label, href) => {
+    const safeUrl = safeHref(href);
+    if (!safeUrl) return label;
+    return `<a href="${escapeAttr(safeUrl)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+  html = html.replace(/(\*\*|__)(.+?)\1/g, "<strong>$2</strong>");
+  html = html.replace(/(\*|_)(.+?)\1/g, "<em>$2</em>");
+
+  codeTokens.forEach((token, index) => {
+    html = html.replace(`@@CODE_${index}@@`, token);
+  });
+
+  return html;
+}
+
+function renderMarkdown(text) {
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const parts = [];
+  let paragraph = [];
+  let listType = null;
+  let listItems = [];
+  let quoteLines = [];
+  let codeFence = null;
+  let codeLines = [];
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    parts.push(`<p>${paragraph.map(renderInlineMarkdown).join("<br>")}</p>`);
+    paragraph = [];
+  }
+
+  function flushList() {
+    if (!listType || !listItems.length) return;
+    const tag = listType === "ol" ? "ol" : "ul";
+    parts.push(`<${tag}>${listItems.map(item => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</${tag}>`);
+    listType = null;
+    listItems = [];
+  }
+
+  function flushQuote() {
+    if (!quoteLines.length) return;
+    parts.push(`<blockquote>${quoteLines.map(line => renderInlineMarkdown(line)).join("<br>")}</blockquote>`);
+    quoteLines = [];
+  }
+
+  function flushCode() {
+    if (codeFence === null) return;
+    const langClass = codeFence ? ` class="language-${escapeAttr(codeFence)}"` : "";
+    parts.push(`<pre><code${langClass}>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    codeFence = null;
+    codeLines = [];
+  }
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^```([\w-]+)?\s*$/);
+    if (fenceMatch) {
+      flushParagraph();
+      flushList();
+      flushQuote();
+      if (codeFence !== null) flushCode();
+      else codeFence = fenceMatch[1] || "";
+      continue;
+    }
+
+    if (codeFence !== null) {
+      codeLines.push(line);
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      flushList();
+      flushQuote();
+      continue;
+    }
+
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      flushList();
+      flushQuote();
+      const level = headingMatch[1].length;
+      parts.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+      continue;
+    }
+
+    const quoteMatch = line.match(/^>\s?(.*)$/);
+    if (quoteMatch) {
+      flushParagraph();
+      flushList();
+      quoteLines.push(quoteMatch[1]);
+      continue;
+    }
+    flushQuote();
+
+    const ulMatch = line.match(/^[-*+]\s+(.+)$/);
+    if (ulMatch) {
+      flushParagraph();
+      if (listType && listType !== "ul") flushList();
+      listType = "ul";
+      listItems.push(ulMatch[1]);
+      continue;
+    }
+
+    const olMatch = line.match(/^\d+\.\s+(.+)$/);
+    if (olMatch) {
+      flushParagraph();
+      if (listType && listType !== "ol") flushList();
+      listType = "ol";
+      listItems.push(olMatch[1]);
+      continue;
+    }
+
+    flushList();
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  flushQuote();
+  flushCode();
+
+  return parts.join("");
+}
+
+function createMarkdownBody(text) {
+  const body = document.createElement("div");
+  body.className = "msg-body";
+  body.innerHTML = renderMarkdown(text);
+  return body;
+}
+
 function addMsg(role, text, options = {}) {
   const { alert = role === "jarvis", pending = true, label } = options;
   const defaultLabel = role === "user" ? "You" : role === "jarvis" ? "Jarvis" : "Peer";
@@ -1931,7 +2184,7 @@ function addMsg(role, text, options = {}) {
   labelSpan.className = "msg-label";
   labelSpan.textContent = labelText;
   div.appendChild(labelSpan);
-  div.appendChild(document.createTextNode(text));
+  div.appendChild(createMarkdownBody(text));
   chatMessages.appendChild(div);
 
   while (chatMessages.children.length > MAX_CHAT_HISTORY) {
