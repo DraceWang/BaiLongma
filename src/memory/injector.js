@@ -84,7 +84,7 @@ function searchRelevantMemories(text, limit = 20) {
 // ── LLM：仅负责 directions + thought + extra_tools ───────────────────────────
 const DIRECTION_PROMPT = `你是思维方向生成器。根据当前输入和上下文，生成简短的思维方向提示。
 
-输出格式（严格 JSON，无多余文字）：
+你的输出格式（严格 JSON，无多余文字）：
 {
   "directions": ["方向1"],
   "thought": {"concept": "概念", "line": "一句话"} | null,
@@ -107,7 +107,7 @@ const DIRECTION_PROMPT = `你是思维方向生成器。根据当前输入和上
 - 示例：{"concept":"镜子","line":"看镜子的人，会不会也被镜子看见"}
 
 【extra_tools 规则】
-- 只填写基础工具之外的额外工具
+- 你只填写基础工具之外的额外工具
 - speak：仅在输入中明确提到"声音"、"朗读"、"说出来"时
 - search_memory：仅在需要主动搜索历史记忆时
 - 通常为空数组 []`

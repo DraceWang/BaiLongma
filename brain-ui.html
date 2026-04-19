@@ -316,6 +316,16 @@ body {
   flex-direction: column-reverse;
 }
 
+.panel-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
 .stream::-webkit-scrollbar,
 .panel::-webkit-scrollbar { width: 6px; }
 
@@ -579,10 +589,8 @@ body {
 .theme-dot[data-t="sand"] { background: linear-gradient(135deg, #eae2d2, #c8502e); }
 
 .reset-view {
-  position: fixed;
-  bottom: 24px;
-  left: 24px;
-  z-index: 50;
+  position: relative;
+  z-index: 1;
   padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
@@ -603,11 +611,9 @@ body {
 .reset-view:hover { color: var(--ink); }
 
 .physics-control {
-  position: fixed;
-  left: 24px;
-  bottom: 70px;
-  z-index: 52;
-  width: 220px;
+  position: relative;
+  z-index: 1;
+  width: 100%;
   border-radius: 16px;
   border: 1px solid var(--line-strong);
   background: var(--panel);
@@ -742,6 +748,42 @@ body {
   <div class="stream">
     <div class="stream-inner" id="si-l1"></div>
   </div>
+
+  <div class="panel-actions">
+    <button class="reset-view" id="reset-view-btn" type="button">Reset View</button>
+
+    <section class="physics-control" id="physics-control">
+      <button class="physics-toggle" id="physics-toggle" type="button" aria-expanded="false">
+        <span class="physics-toggle-label">Graph Tuning</span>
+        <span class="physics-toggle-icon">▾</span>
+      </button>
+      <div class="physics-panel" id="physics-panel">
+        <div class="physics-panel-inner">
+          <div class="physics-field">
+            <div class="physics-field-head">
+              <label class="physics-field-label" for="gravity-slider">Gravity</label>
+              <span class="physics-field-value" id="gravity-value">1.00x</span>
+            </div>
+            <input class="physics-slider" id="gravity-slider" type="range" min="0.6" max="1.6" step="0.02" value="1">
+          </div>
+          <div class="physics-field">
+            <div class="physics-field-head">
+              <label class="physics-field-label" for="repulsion-slider">Repulsion</label>
+              <span class="physics-field-value" id="repulsion-value">1.00x</span>
+            </div>
+            <input class="physics-slider" id="repulsion-slider" type="range" min="0.6" max="1.6" step="0.02" value="1">
+          </div>
+          <div class="physics-field">
+            <div class="physics-field-head">
+              <label class="physics-field-label" for="node-size-slider">Node Size</label>
+              <span class="physics-field-value" id="node-size-value">1.00x</span>
+            </div>
+            <input class="physics-slider" id="node-size-slider" type="range" min="0.75" max="1.8" step="0.02" value="1">
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
 </aside>
 
 <aside id="panel-l2" class="panel">
@@ -788,39 +830,6 @@ body {
   </div>
 </section>
 
-<button class="reset-view" id="reset-view-btn" type="button">Reset View</button>
-
-<section class="physics-control" id="physics-control">
-  <button class="physics-toggle" id="physics-toggle" type="button" aria-expanded="false">
-    <span class="physics-toggle-label">Graph Tuning</span>
-    <span class="physics-toggle-icon">▾</span>
-  </button>
-  <div class="physics-panel" id="physics-panel">
-    <div class="physics-panel-inner">
-      <div class="physics-field">
-        <div class="physics-field-head">
-          <label class="physics-field-label" for="gravity-slider">Gravity</label>
-          <span class="physics-field-value" id="gravity-value">1.00x</span>
-        </div>
-        <input class="physics-slider" id="gravity-slider" type="range" min="0.6" max="1.6" step="0.02" value="1">
-      </div>
-      <div class="physics-field">
-        <div class="physics-field-head">
-          <label class="physics-field-label" for="repulsion-slider">Repulsion</label>
-          <span class="physics-field-value" id="repulsion-value">1.00x</span>
-        </div>
-        <input class="physics-slider" id="repulsion-slider" type="range" min="0.6" max="1.6" step="0.02" value="1">
-      </div>
-      <div class="physics-field">
-        <div class="physics-field-head">
-          <label class="physics-field-label" for="node-size-slider">Node Size</label>
-          <span class="physics-field-value" id="node-size-value">1.00x</span>
-        </div>
-        <input class="physics-slider" id="node-size-slider" type="range" min="0.75" max="1.8" step="0.02" value="1">
-      </div>
-    </div>
-  </div>
-</section>
 
 <div class="theme-switcher" id="theme-switcher">
   <div class="theme-dot active" data-t="midnight" title="Midnight Steel"></div>

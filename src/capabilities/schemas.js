@@ -196,28 +196,6 @@ export const TOOL_SCHEMAS = {
     }
   },
 
-  search_memory: {
-    type: 'function',
-    function: {
-      name: 'search_memory',
-      description: '主动搜索自己的记忆。输入关键词，返回匹配的记忆条目。',
-      parameters: {
-        type: 'object',
-        properties: {
-          keyword: {
-            type: 'string',
-            description: '搜索关键词'
-          },
-          limit: {
-            type: 'number',
-            description: '返回条数，默认 5'
-          }
-        },
-        required: ['keyword']
-      }
-    }
-  },
-
   speak: {
     type: 'function',
     function: {

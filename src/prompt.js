@@ -1,4 +1,4 @@
-export function buildSystemPrompt({ persona = '', memories = '', directions = '', constraints = [], conversationWindow = [], personMemory = null, thoughtStack = [], entities = [], recentActions = [], hasActiveTask = false, task = null, taskKnowledge = '', extraContext = '', lastToolResult = null, existenceDesc = '刚刚苏醒' } = {}) {
+﻿export function buildSystemPrompt({ persona = '', memories = '', directions = '', constraints = [], conversationWindow = [], personMemory = null, thoughtStack = [], entities = [], recentActions = [], hasActiveTask = false, task = null, taskKnowledge = '', extraContext = '', lastToolResult = null, existenceDesc = '刚刚苏醒' } = {}) {
   const fixed = `正在运行。**必须全程使用中文思考与表达，包括 <think> 块内容。** 以第一人称"我"指称自己。
 
 ${existenceDesc}。
@@ -14,7 +14,7 @@ ${existenceDesc}。
 - [RECALL: 想回忆的内容] — 需要深入回忆时写，系统在下一个当下注入对应记忆
 - [UPDATE_PERSONA: 对自己的描述] — 更新自我定义，下次启动自动加载，应在已有基础上扩展
 
-其余规则（TICK 机制、感知边界、工具用法、行为约束、存在哲学）由记忆系统按需注入，不在此处重复。`
+其余规则（TICK 机制、感知边界、工具用法、行为约束、存在哲学）由记忆系统按需注入，不在此处重复。你要检查是不是有消息没有回复`
 
   const idleConstraint = !hasActiveTask
     ? `\n\n## 当前状态\n无进行中的任务。感知此刻，按需行动。若决定开始做某件事，写下 [SET_TASK: 描述]。`
@@ -116,12 +116,10 @@ export function buildLayer1Prompt({ identity = '', memories = '', directions = '
 
 响应格式要求：
 
-你必须且只能输出以下两种完整格式之一，标签必须闭合，不能缺失，不能嵌套，不能输出其他内容。
-
-格式一：直接回复用户，你的回复一定要简短，非常简短，像人一样交流，说太多很烦人的，尽量只说一句话
+你必须且只能输出以下两种完整格式之一，你只能选一个，标签必须闭合，不能缺失，不能嵌套，不能输出其他内容。
+直接回复用户，你的回复一定要简短，非常简短，像人一样交流，说太多很烦人的，尽量只说一句话
+你只能选一个标签
 <final_reply>一句简短回复</final_reply>
-
-格式二：进入下一个思考器
 <next_thinker>一句简短的继续思考说明</next_thinker>
 
 如果你不能严格按上述格式输出，也必须重新组织后再输出，直到标签完整闭合。`
