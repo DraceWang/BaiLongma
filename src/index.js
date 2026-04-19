@@ -132,6 +132,7 @@ async function process(input, label, msg = null) {
   // ── L1 预思考：收到他者消息时先过一层思考器，能直接回就短回复，不然交给 L2 ──
   currentAbortController = new AbortController()
   let l1ThoughtPushed = false
+  let l1Hint = '' // L1 next_thinker 输出，供 L2 注入器扩展记忆检索
 
   if (!isTick && msg && msg.fromId && msg.fromId !== 'jarvis') {
     // L1 也通过 send_message 真发消息，需要带上 toolContext 校验目标 ID
@@ -200,10 +201,11 @@ async function process(input, label, msg = null) {
       return
     }
     // next_thinker：继续走 L2 流程，controller 保留
+    l1Hint = l1.content || ''
   }
 
-  // 1. 注入器
-  const injection = await runInjector({ message: input, state })
+  // 1. 注入器（带上 L1 hint，让 L2 在更大关键词集合里搜记忆）
+  const injection = await runInjector({ message: input, state, hint: l1Hint })
   const memoriesText = formatMemoriesForPrompt(injection.memories, injection.recallMemories)
   const directionsText = injection.directions.join('\n')
   const taskKnowledgeText = formatTaskKnowledge(injection.taskKnowledge)
