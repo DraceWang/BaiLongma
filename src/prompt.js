@@ -118,14 +118,13 @@ export function buildLayer1Prompt({ identity = '', memories = '', directions = '
 你不要输出面向用户的最终答案，不要输出冗长解释，不要空转。
 你最后思考你要怎么回复用户
 你的回复一定要简短，非常简短，像人一样交流，多想少说，说太多很烦人的，尽量只说一句话
+你收到用户消息时先用send_message回复对方，在开始做其他的。
 
 响应格式要求：
 
 你必须且只能选择以下两种方式之一，不可同时执行：
 - **能直接回复**：调用 send_message 工具发出（target_id=对方ID，content=简短回复内容）。回复要非常简短，像人一样交流，尽量只说一句话。调用工具之外不要输出任何其他文本。
-- **需要 L2 继续思考**：输出 <next_thinker>一句简短的继续思考说明</next_thinker> 标签，且不要调用 send_message。
-
-不要再使用 <l1_reply> 等旧标签。如果格式不符必须重新组织。`
+`
 
   const parts = []
 
