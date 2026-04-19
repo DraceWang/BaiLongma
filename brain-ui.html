@@ -409,6 +409,8 @@ body {
   right: 402px;
   bottom: 24px;
   z-index: 4;
+  display: flex;
+  flex-direction: column;
   border-radius: 14px;
   border: 1px solid var(--line-strong);
   background: var(--console-bg);
@@ -417,20 +419,23 @@ body {
 }
 
 #chat-history {
+  flex: 1 1 auto;
+  min-height: 0;
   max-height: 0;
   overflow: hidden;
   transition: max-height 0.62s cubic-bezier(1, 0, 0.2, 1);
 }
 
-#chat-history.open { max-height: 800px; }
+#chat-history.open { max-height: min(800px, calc(100vh - 160px)); }
 
 #chat-messages {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 1080px;
+  min-height: 0;
+  max-height: min(800px, calc(100vh - 220px));
   overflow-y: auto;
-  padding: 14px 18px 6px;
+  padding: 14px 18px 10px;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -569,10 +574,12 @@ body {
 }
 
 #input-row {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 14px 18px;
+  border-top: 1px solid var(--line);
 }
 
 .prompt-mark {
