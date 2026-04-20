@@ -888,6 +888,7 @@ function isFailureResult(resultStr) {
 class ThoughtStream {
   constructor(innerId, color, options = {}) {
     this.el = document.getElementById(innerId);
+    this.scroller = this.el?.parentElement || null;
     this.color = color;
     this.thinkingLabel = options.thinkingLabel || "思考中";
     this.thinkingDoneLabel = options.thinkingDoneLabel || null;
@@ -910,7 +911,7 @@ class ThoughtStream {
 
   trim() {
     while (this.el.children.length > this.MAX) {
-      const old = this.el.lastChild;
+      const old = this.el.firstChild;
       old.classList.add("fading");
       setTimeout(() => old.remove(), 520);
       break;
@@ -949,14 +950,16 @@ class ThoughtStream {
 
     this.thinkingEl = null;
 
-    this.el.insertBefore(this.curLine, this.el.firstChild);
+    this.el.appendChild(this.curLine);
     this.trim();
     this.scrollToLatest();
   }
 
   scrollToLatest() {
-    if (!this.curLine) return;
-    this.curLine.scrollIntoView({ block: "end", inline: "nearest" });
+    if (!this.scroller) return;
+    requestAnimationFrame(() => {
+      this.scroller.scrollTop = this.scroller.scrollHeight;
+    });
   }
 
   setStatus(text, kind = "busy") {
@@ -1094,6 +1097,7 @@ const L1 = new ThoughtStream("si-l1", "cool", {
 });
 const L2 = new ThoughtStream("si-l2", "warm", {
   thinkingLabel: "思考中",
+  thinkingDoneLabel: "思考完成",
   toolDetailLength: 220,
 });
 

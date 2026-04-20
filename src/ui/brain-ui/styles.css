@@ -300,7 +300,8 @@ body {
 
 .stream-inner {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 .panel-actions {

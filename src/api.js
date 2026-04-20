@@ -48,6 +48,25 @@ function extractAgentRename(content) {
   const text = String(content || '').trim()
   if (!text) return null
 
+  const questionPatterns = [
+    /你叫什么(?:名字)?[？?]?\s*$/i,
+    /你叫啥[？?]?\s*$/i,
+    /你叫\.{0,3}什么[？?]?\s*$/i,
+    /请问你叫什么(?:名字)?[？?]?\s*$/i,
+    /what(?:'s| is)\s+your\s+name\??\s*$/i,
+    /who\s+are\s+you\??\s*$/i,
+  ]
+  if (questionPatterns.some((pattern) => pattern.test(text))) return null
+
+  const hasQuestionTone =
+    /[？?]/.test(text) ||
+    /(^|[，,。.!！\s])(什么|啥|几|吗|么|哪一个|哪个|是不是)($|[，,。.!！\s])/.test(text)
+  const renameVerbHit =
+    /(改成|改为|换成|换做|叫做|叫|自称|称呼你|管你叫|call you|rename you|name is now)/i.test(text)
+  if (hasQuestionTone && !/(从.+起|以后|之后|现在起|改成|改为|换成|换做|rename|name is now)/i.test(text)) {
+    return null
+  }
+
   const intentPatterns = [
     /叫你/i,
     /你.*叫/i,
@@ -67,6 +86,7 @@ function extractAgentRename(content) {
     /给你.*换个?名字/i,
   ]
   if (!intentPatterns.some((pattern) => pattern.test(text))) return null
+  if (/^你.*叫/i.test(text) && !renameVerbHit && hasQuestionTone) return null
 
   const normalizeName = (raw) => {
     const cleaned = String(raw || "")
