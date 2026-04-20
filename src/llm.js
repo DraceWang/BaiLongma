@@ -288,6 +288,10 @@ function buildToolLogDetail(args = {}, result = '') {
   return argPreview || resultPreview
 }
 
+function shouldPersistActionLog(toolName) {
+  return toolName !== 'send_message'
+}
+
 function throwIfAborted(signal) {
   if (!signal?.aborted) return
   const err = new Error(signal.reason || 'Aborted')
@@ -367,12 +371,14 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
       const normalizedArgs = normalizeArgs(tc.name, args)
       const result = await executeTool(tc.name, normalizedArgs, { ...toolContext, signal })
       throwIfAborted(signal)
-      insertActionLog({
-        timestamp: new Date().toISOString(),
-        tool: tc.name,
-        summary: summarizeToolCall(tc.name, normalizedArgs),
-        detail: buildToolLogDetail(normalizedArgs, result),
-      })
+      if (shouldPersistActionLog(tc.name)) {
+        insertActionLog({
+          timestamp: new Date().toISOString(),
+          tool: tc.name,
+          summary: summarizeToolCall(tc.name, normalizedArgs),
+          detail: buildToolLogDetail(normalizedArgs, result),
+        })
+      }
       console.log(`[工具结果] ${tc.name}: ${result.slice(0, 100)}`)
       if (onToolCall) onToolCall(tc.name, args, result)
       lastToolResult = { name: tc.name, args: normalizedArgs, result }
