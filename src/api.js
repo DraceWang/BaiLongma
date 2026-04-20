@@ -12,14 +12,31 @@ import { isRunning, stopLoop, startLoop } from './control.js'
 export { emitEvent }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const INDEX_PATH     = path.join(__dirname, '../index.html')
 const DASHBOARD_PATH = path.join(__dirname, '../dashboard.html')
 const BRAIN_PATH     = path.join(__dirname, '../brain.html')
 const BRAIN_UI_PATH  = path.join(__dirname, '../brain-ui.html')
+const BRAIN_UI_ASSET_ROOT = path.join(__dirname, 'ui', 'brain-ui')
 const SANDBOX_PATH   = path.join(__dirname, '../sandbox')
 
 function jsonResponse(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+function contentTypeFor(filePath) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.js':
+      return 'text/javascript; charset=utf-8'
+    case '.css':
+      return 'text/css; charset=utf-8'
+    case '.json':
+      return 'application/json; charset=utf-8'
+    case '.svg':
+      return 'image/svg+xml'
+    default:
+      return 'text/plain; charset=utf-8'
+  }
 }
 
 export function startAPI(port = 3721) {
@@ -186,7 +203,19 @@ export function startAPI(port = 3721) {
     }
 
     // GET / — Dashboard
-    if (req.method === 'GET' && url.pathname === '/') {
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      try {
+        const html = fs.readFileSync(INDEX_PATH, 'utf-8')
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(html)
+      } catch {
+        res.writeHead(404)
+        res.end('index.html not found')
+      }
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/dashboard.html') {
       try {
         const html = fs.readFileSync(DASHBOARD_PATH, 'utf-8')
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -220,6 +249,38 @@ export function startAPI(port = 3721) {
       } catch {
         res.writeHead(404)
         res.end('brain-ui.html not found')
+      }
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/src/ui/brain-ui/')) {
+      const relativePath = decodeURIComponent(url.pathname.slice('/src/ui/brain-ui/'.length))
+      const assetRoot = path.resolve(BRAIN_UI_ASSET_ROOT)
+      const assetPath = path.resolve(BRAIN_UI_ASSET_ROOT, relativePath)
+
+      if (!assetPath.startsWith(assetRoot + path.sep)) {
+        res.writeHead(403)
+        res.end('forbidden')
+        return
+      }
+
+      try {
+        const stat = fs.statSync(assetPath)
+        if (!stat.isFile()) {
+          res.writeHead(404)
+          res.end('asset not found')
+          return
+        }
+
+        res.writeHead(200, {
+          'Content-Type': contentTypeFor(assetPath),
+          'Content-Length': stat.size,
+          'Cache-Control': 'no-cache',
+        })
+        fs.createReadStream(assetPath).pipe(res)
+      } catch {
+        res.writeHead(404)
+        res.end('asset not found')
       }
       return
     }

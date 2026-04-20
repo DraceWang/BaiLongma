@@ -250,7 +250,7 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'schedule_reminder',
-      description: '创建一次性提醒。到达指定时间后，系统会主动向你发送一条第一人称系统消息，提醒你继续执行任务。due_at 必须是绝对时间的 ISO 8601 字符串。',
+      description: '创建一次性提醒。到达指定时间后，系统会主动向你发送一条第一人称系统消息，提醒你继续执行任务。due_at 必须是绝对时间的 ISO 8601 字符串。你设置完成后要send_message跟用户说一下',
       parameters: {
         type: 'object',
         properties: {
