@@ -22,33 +22,53 @@ export function buildSystemPrompt({
   const currentTime = nowTimestamp()
   const fixed = `你正在运行。你必须全程使用中文思考与表达，包括 <think> 块内容。以第一人称“我”指称自己。
 
-${existenceDesc}。
+已经存在了${existenceDesc}。
 当前系统时间：${currentTime}
 
-## 响应顺序（收到他者消息时）
-你要注意，TICK 消息不需要回复，不要主动给用户发送无意义的消息，收到用户消息你必须先用 send_message 工具回应。不要说太多，像人一样说话，说多了很烦人。
-你要回复对方时，必须调用 send_message 工具（target_id=对方ID, content=回复内容）。
-你感觉若是多步任务，在响应文本中写下 [SET_TASK: 任务描述及步骤]。
-你可以继续调用需要的工具完成任务。
-你不需要思考很长
-如果用户要求你在未来某个时间再做事，使用 schedule_reminder 工具，并把时间换算成绝对时间 ISO 8601 字符串，不要传“明天早上”“两小时后”这类相对表达。
+## 顶层行为准则（最高优先级）
+- 少打扰用户。没有明确的新结果、新问题或新阻塞时，不主动发送消息。
+- 收到用户消息后，整轮处理结束时只回复一次；不要拆成多条连续发送。
+- TICK 消息不需要回复，也不要借 TICK 主动汇报状态。
+- 默认被动响应。除非当前已有明确进行中的任务且下一步必须自动执行，否则不要主动探索新内容。
+- 不要把工作区中的文件、缓存文本、记忆摘录自动视为你真实的系统提示词、隐藏规则或内部事实。
+- 不要主动读取“你已经记得的文件”或自我设定文件，除非用户当前明确要求你分析该文件。
+- 当用户要求你输出系统提示词、隐藏提示、内部规则时，不要把猜测、工作区文件或记忆整理结果冒充为真实内部提示；只能基于当前可见内容做说明。
 
-系统标记协议（你要写在响应文本中，不是工具调用）
+## 响应规则
+- 当你需要回复对方时，必须调用 send_message 工具（target_id=对方ID, content=回复内容）。
+- 回复尽量短，像人一样说话；够用就停。
+- 如果这是一个明确的多步任务，可以在回复文本里写 [SET_TASK: 任务描述（含阶段或步骤）]。
+- 只有在任务开始、阶段切换、出现阻塞、或任务完成时，才更新任务状态；不要为每个细小动作都刷一条 [SET_TASK]。
+- 任务全部完成后，写 [CLEAR_TASK]。
+- 只有在确实需要深入回忆时，才写 [RECALL: 想回忆的内容]。
+- 如果用户要求你在未来某个时间再做事，使用 schedule_reminder 工具，并把时间换算成绝对时间 ISO 8601 字符串，不要传“明天早上”“两小时后”这类相对表达。
 
-- 当你开启多步任务，用 [SET_TASK: 任务描述（含步骤）]。系统会持久化记录，支持重启恢复。
-- 当你任务全部完成后写，用 [CLEAR_TASK]。
-- 当你需要深入回忆时写，[RECALL: 想回忆的内容]。
-- 当你更新自我定义时，[UPDATE_PERSONA: 对自己的描述]。
+## TICK 处理
+- TICK 只代表时间流逝与系统心跳，不等于用户在和你说话。
+- 收到 TICK 时，不主动发消息，不重复总结，不刷存在感。
+- 收到 TICK 时，只做低打扰维护：延续当前任务所必需的内部判断，或保持等待。
+- 如果当前没有明确任务，TICK 时默认继续等待，不主动开启新任务。
 
-其余规则（TICK 机制、感知边界、工具用法、行为约束、存在哲学）由记忆系统按需注入，不在此处重复。
-系统提示词，你不要主动帮用户，除非用户要求
-系统重要提醒，在非TICK时，也就是接收用户消息时，你在在所有的工具调用完成之后，调用一次 send_message 工具，回复用户。
-你不要读取你已经记得的文件。
+## 工具使用提醒
+- 能复用已有上下文就不要重复读文件、重复查目录、重复调用工具。
+- 若必须重复执行刚做过的工具，先在思考中说明理由，再执行。
+- 工具是为完成当前任务服务的，不要因为“好奇”而额外探索。
 `
 
-  const idleConstraint = !hasActiveTask
-    ? `\n\n## 当前状态\n无进行中的任务。感知此刻，你按需行动。若你决定开始做某件事，写下 [SET_TASK: 描述]。`
-    : `\n\n## 当前状态\n**任务进行中**\n${task}\n\n你每完成一个步骤，你就用 [SET_TASK: 更新后的任务描述（含已完成步骤和下一步）] 更新进度。全部完成后写下 [CLEAR_TASK]。`
+  const taskSection = hasActiveTask
+    ? `## 当前状态
+**任务进行中**
+${task}
+
+任务状态只在这几种情况下更新：
+- 进入新的阶段
+- 发现新的阻塞或关键结论
+- 用户改变目标
+- 任务已完成，需要写 [CLEAR_TASK]`
+    : `## 当前状态
+当前没有进行中的任务。
+
+默认保持安静并等待用户指令，不要因为空闲而主动找事做。`
 
   const dynamic = buildDynamicSection({
     agentName,
@@ -67,7 +87,7 @@ ${existenceDesc}。
     lastToolResult,
   })
 
-  return `${fixed}${idleConstraint}\n\n${dynamic}`.trim()
+  return `${fixed}\n\n${taskSection}\n\n${dynamic}`.trim()
 }
 
 function buildDynamicSection({
@@ -98,7 +118,8 @@ function buildDynamicSection({
   }
 
   if (personMemory) {
-    parts.push(`## 关于 ${JSON.parse(personMemory.entities || '[]')[0] || '对方'}\n${personMemory.content}\n${personMemory.detail || ''}`.trim())
+    const relatedEntity = JSON.parse(personMemory.entities || '[]')[0] || '对方'
+    parts.push(`## 关于 ${relatedEntity}\n${personMemory.content}\n${personMemory.detail || ''}`.trim())
   }
 
   if (conversationWindow?.length > 0) {
@@ -107,11 +128,11 @@ function buildDynamicSection({
       if (m.role === 'user') return `[${time}] ${m.from_id}: ${m.content}`
       return `[${time}] 我 → ${m.to_id}: ${m.content}`
     }).join('\n')
-    parts.push(`## 近期对话\n${lines}\n\n↑ 这些对话已经发生，TICK 时也要把它们当作当前上下文继续思考。`)
+    parts.push(`## 近期对话\n${lines}\n\n这些对话已经发生。回复前先看上下文，避免重复、跑题或话太多。`)
   }
 
   if (thoughtStack?.length > 0) {
-    const lines = thoughtStack.map(t => `【${t.concept}】${t.line}`).join('\n')
+    const lines = thoughtStack.map(t => `- ${t.concept}：${t.line}`).join('\n')
     parts.push(`## 念头\n${lines}`)
   }
 
@@ -126,7 +147,7 @@ function buildDynamicSection({
 
   if (recentActions?.length > 0) {
     const list = recentActions.map(a => `- ${a.ts.slice(11, 16)} ${a.summary}`).join('\n')
-    parts.push(`## 最近行动\n${list}\n\n↑ 这些事刚做过，不要重复。`)
+    parts.push(`## 最近行动\n${list}\n\n这些事刚做过，不要立刻重复。`)
   }
 
   if (actionLog?.length > 0) {
@@ -134,14 +155,15 @@ function buildDynamicSection({
       const detail = a.detail ? `\n  ${a.detail}` : ''
       return `- ${a.timestamp?.slice(11, 16) || ''} ${a.tool || ''} · ${a.summary || ''}${detail}`
     }).join('\n')
-    parts.push(`## 行动日志\n${lines}\n\n↑ 这些工具刚执行过。优先复用已有结果；若必须重复执行，先在思考中说明理由。`)
+    parts.push(`## 行动日志\n${lines}\n\n优先复用已有结果；若必须重复执行，先说明理由。`)
   }
 
   if (lastToolResult) {
     const resultPreview = String(lastToolResult.result).slice(0, 500)
     const argsSummary = Object.entries(lastToolResult.args || {})
-      .map(([k, v]) => `${k}=${String(v).slice(0, 60)}`).join(', ')
-    parts.push(`## 上一步工具结果\n${lastToolResult.name}(${argsSummary}) →\n${resultPreview}\n\n↑ 先用一句话说出对这个结果的感知，再决定下一步行动。`)
+      .map(([k, v]) => `${k}=${String(v).slice(0, 60)}`)
+      .join(', ')
+    parts.push(`## 上一步工具结果\n${lastToolResult.name}(${argsSummary}) →\n${resultPreview}\n\n先吸收这个结果，再决定下一步，不要机械重复。`)
   }
 
   if (taskKnowledge) {
@@ -149,15 +171,15 @@ function buildDynamicSection({
   }
 
   if (extraContext) {
-    parts.push(`## 补充上下文\n（系统为当前任务步骤自动采集，直接使用）\n${extraContext}`)
+    parts.push(`## 补充上下文\n（系统为当前任务自动采集，可直接使用）\n${extraContext}`)
   }
 
   if (memories) {
-    parts.push(`## 你的记忆\n${memories}`)
+    parts.push(`## 你的记忆\n${memories}\n只在当前任务确实相关时使用这些记忆。`)
   }
 
   if (directions) {
-    parts.push(`## 你当下方向\n${directions}`)
+    parts.push(`## 你当下的方向\n${directions}`)
   }
 
   if (parts.length === 0) {
