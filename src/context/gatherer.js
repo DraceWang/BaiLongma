@@ -22,6 +22,14 @@ const SANDBOX_ROOT = path.resolve(__dirname, '../../sandbox')
 const MAX_ROUNDS = 3
 const FILE_PREVIEW_CHARS = 2000  // 文件内容截断长度
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    const err = new Error(signal.reason || 'Aborted')
+    err.name = 'AbortError'
+    throw err
+  }
+}
+
 const CHECKER_PROMPT = `你是上下文充分性检查器。判断当前注入的知识和经验是否足以处理任务的下一步。
 
 【输出规则】
@@ -51,13 +59,15 @@ const CHECKER_PROMPT = `你是上下文充分性检查器。判断当前注入�
  * @param {string} params.message    当前处理的输入（TICK 或消息）
  * @returns {Array} extraContext — 每项 { type, label, content }
  */
-export async function gatherContext({ task, taskKnowledge, memories, message }) {
+export async function gatherContext({ task, taskKnowledge, memories, message, signal }) {
   if (!task) return []
 
   const extraContext = []
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const checkResult = await checkSufficiency({ task, taskKnowledge, memories, message, extraContext })
+    throwIfAborted(signal)
+    const checkResult = await checkSufficiency({ task, taskKnowledge, memories, message, extraContext, signal })
+    throwIfAborted(signal)
 
     if (!checkResult || checkResult.sufficient !== false) break
 
@@ -66,6 +76,7 @@ export async function gatherContext({ task, taskKnowledge, memories, message }) 
 
     let resolved = 0
     for (const need of needs) {
+      throwIfAborted(signal)
       const item = await resolveNeed(need, extraContext)
       if (item) {
         extraContext.push(item)
@@ -80,7 +91,7 @@ export async function gatherContext({ task, taskKnowledge, memories, message }) 
   return extraContext
 }
 
-async function checkSufficiency({ task, taskKnowledge, memories, message, extraContext }) {
+async function checkSufficiency({ task, taskKnowledge, memories, message, extraContext, signal }) {
   const extraSection = extraContext.length > 0
     ? '\n\n已补充上下文：\n' + extraContext.map(c => `[${c.label}]\n${c.content.slice(0, 500)}`).join('\n')
     : ''
@@ -105,6 +116,7 @@ ${memories || '（空）'}${extraSection}
       systemPrompt: CHECKER_PROMPT,
       message: input,
       temperature: 0,
+      signal,
     })
     raw = result.content
   } catch (err) {

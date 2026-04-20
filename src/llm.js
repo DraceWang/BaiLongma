@@ -288,6 +288,13 @@ function buildToolLogDetail(args = {}, result = '') {
   return argPreview || resultPreview
 }
 
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return
+  const err = new Error(signal.reason || 'Aborted')
+  err.name = 'AbortError'
+  throw err
+}
+
 // 主调用：agentic 循环，连续执行工具直到模型停止
 // 返回 { content: string, toolResult: { name, args, result } | null, aborted: bool }
 export async function callLLM({ systemPrompt, message, temperature = 0.5, topP = 0.9, tools = [], maxTokens, thinking = true, signal, onToolCall, onStream, onRetry, toolContext = {} }) {
@@ -308,7 +315,7 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
   const MAX_TOOL_ROUNDS = 10
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    if (signal?.aborted) break
+    throwIfAborted(signal)
 
     const { content, toolCalls, aborted } = await streamOnceWithRetry({
       messages,
@@ -350,7 +357,7 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
     // 执行所有工具调用，收集结果
     const toolResults = []
     for (const tc of effectiveToolCalls) {
-      if (signal?.aborted) break
+      throwIfAborted(signal)
       console.log(`[工具调用] ${tc.name}`)
       let args
       try { args = JSON.parse(tc.arguments || '{}') } catch { args = {} }
@@ -358,7 +365,8 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
         console.log(`[工具警告] ${tc.name} 参数为空`)
       }
       const normalizedArgs = normalizeArgs(tc.name, args)
-      const result = await executeTool(tc.name, normalizedArgs, toolContext)
+      const result = await executeTool(tc.name, normalizedArgs, { ...toolContext, signal })
+      throwIfAborted(signal)
       insertActionLog({
         timestamp: new Date().toISOString(),
         tool: tc.name,
@@ -370,7 +378,7 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
       lastToolResult = { name: tc.name, args: normalizedArgs, result }
       toolResults.push({ id: tc.id, name: tc.name, result })
     }
-    if (signal?.aborted) break
+    throwIfAborted(signal)
 
     // 将本轮 assistant 消息（含工具调用）加入对话
     // 若是 XML 解析的工具调用，assistant 消息用文本形式（避免 MiniMax 不支持 tool_calls 格式回放）

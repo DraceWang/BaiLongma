@@ -37,6 +37,45 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 文件操作只允许在 sandbox 目录内
 const SANDBOX_ROOT = path.resolve(__dirname, '../../sandbox')
 
+function createAbortError(reason = 'Aborted') {
+  const err = new Error(reason)
+  err.name = 'AbortError'
+  return err
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError(signal.reason || 'Aborted')
+}
+
+function createMergedAbortSignal(signal, timeoutMs) {
+  if (!signal && !timeoutMs) return null
+
+  const controller = new AbortController()
+  let timeoutId = null
+
+  const abort = (reason) => {
+    if (!controller.signal.aborted) controller.abort(reason)
+  }
+
+  const onAbort = () => abort(signal?.reason || 'Aborted')
+  if (signal) {
+    if (signal.aborted) abort(signal.reason || 'Aborted')
+    else signal.addEventListener('abort', onAbort, { once: true })
+  }
+
+  if (timeoutMs) {
+    timeoutId = setTimeout(() => abort(`Timeout ${timeoutMs}ms`), timeoutMs)
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      if (timeoutId) clearTimeout(timeoutId)
+      if (signal) signal.removeEventListener('abort', onAbort)
+    },
+  }
+}
+
 function assertInSandbox(resolvedPath) {
   if (!resolvedPath.startsWith(SANDBOX_ROOT)) {
     throw new Error(`访问被拒绝：文件操作只允许在 sandbox 目录内（${SANDBOX_ROOT}）`)
@@ -53,29 +92,30 @@ function normalizeSandboxPath(filePath) {
 // 工具执行器：根据工具名和参数执行对应操作，返回结果字符串
 export async function executeTool(name, args, context = {}) {
   try {
+    throwIfAborted(context.signal)
     switch (name) {
       case 'express':
         return await execExpress(args, context)
       case 'send_message':
         return await execSendMessage(args, context)
       case 'read_file':
-        return await execReadFile(args)
+        return await execReadFile(args, context)
       case 'list_dir':
-        return await execListDir(args)
+        return await execListDir(args, context)
       case 'write_file':
-        return await execWriteFile(args)
+        return await execWriteFile(args, context)
       case 'delete_file':
-        return await execDeleteFile(args)
+        return await execDeleteFile(args, context)
       case 'make_dir':
-        return await execMakeDir(args)
+        return await execMakeDir(args, context)
       case 'exec_command':
-        return await execCommand(args)
+        return await execCommand(args, context)
       case 'kill_process':
         return await execKillProcess(args)
       case 'list_processes':
         return await execListProcesses()
       case 'fetch_url':
-        return await execFetchUrl(args)
+        return await execFetchUrl(args, context)
       case 'search_memory':
         return await execSearchMemory(args)
       case 'speak':
@@ -92,6 +132,7 @@ export async function executeTool(name, args, context = {}) {
         return `错误：未知工具 "${name}"`
     }
   } catch (err) {
+    if (err.name === 'AbortError') throw err
     return `执行失败：${err.message}`
   }
 }
@@ -236,7 +277,8 @@ async function execScheduleReminder({ due_at, task, target_id }, context = {}) {
 }
 
 // read_file：读取文件内容
-async function execReadFile(args) {
+async function execReadFile(args, context = {}) {
+  throwIfAborted(context.signal)
   const rawPath = args.path || args.filename || args.file_path
   if (!rawPath) return '错误：未提供文件路径'
   const filePath = normalizeSandboxPath(rawPath)
@@ -252,7 +294,8 @@ async function execReadFile(args) {
 }
 
 // list_dir：列出目录内容
-async function execListDir(args) {
+async function execListDir(args, context = {}) {
+  throwIfAborted(context.signal)
   const rawPath = args.path || args.dir || args.directory || '.'
   const dirPath = normalizeSandboxPath(rawPath)
   const resolved = path.resolve(SANDBOX_ROOT, dirPath)
@@ -268,7 +311,8 @@ async function execListDir(args) {
 const PROTECTED_FILES = new Set(['readme.txt', 'world.txt', 'package.json'])
 
 // write_file：写入文件
-async function execWriteFile(args) {
+async function execWriteFile(args, context = {}) {
+  throwIfAborted(context.signal)
   const rawPath = args.path || args.filename || args.file_path
   const content = args.content ?? args.text ?? args.data
   if (!rawPath) return '错误：未提供文件路径'
@@ -286,7 +330,8 @@ async function execWriteFile(args) {
 }
 
 // delete_file：删除沙盒内的文件或目录
-async function execDeleteFile(args) {
+async function execDeleteFile(args, context = {}) {
+  throwIfAborted(context.signal)
   const rawPath = args.path || args.filename || args.file_path
   if (!rawPath) return '错误：未提供路径'
   const filePath = normalizeSandboxPath(rawPath)
@@ -307,7 +352,8 @@ async function execDeleteFile(args) {
 }
 
 // make_dir：在沙盒内创建目录（支持多级）
-async function execMakeDir(args) {
+async function execMakeDir(args, context = {}) {
+  throwIfAborted(context.signal)
   const rawPath = args.path || args.dir || args.directory
   if (!rawPath) return '错误：未提供目录路径'
   const dirPath = normalizeSandboxPath(rawPath)
@@ -319,7 +365,8 @@ async function execMakeDir(args) {
 
 // exec_command：在沙盒目录内执行 shell 命令
 // background=true 时后台运行，返回 PID；否则等待完成，返回输出
-async function execCommand(args) {
+async function execCommand(args, context = {}) {
+  throwIfAborted(context.signal)
   const command = args.command || args.cmd
   if (!command) return '错误：未提供命令'
 
@@ -334,7 +381,7 @@ async function execCommand(args) {
   if (background) {
     return execBackground(command)
   } else {
-    return execForeground(command, timeoutMs)
+    return execForeground(command, timeoutMs, context.signal)
   }
 }
 
@@ -369,8 +416,9 @@ function execBackground(command) {
   return `后台进程已启动，PID=${pid}，命令：${command}\n可用 kill_process 工具停止它。`
 }
 
-function execForeground(command, timeoutMs) {
+function execForeground(command, timeoutMs, signal) {
   return new Promise((resolve) => {
+    throwIfAborted(signal)
     const child = spawn(command, {
       shell: true,
       cwd: SANDBOX_ROOT,
@@ -379,11 +427,33 @@ function execForeground(command, timeoutMs) {
     let stdout = ''
     let stderr = ''
     let timedOut = false
+    let settled = false
+    let timer = null
 
-    const timer = setTimeout(() => {
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      merged?.cleanup()
+      resolve(value)
+    }
+
+    const merged = createMergedAbortSignal(signal)
+    const onAbort = () => {
+      child.kill()
+      finish(`命令已中止：${command}`)
+    }
+    if (merged?.signal.aborted) {
+      child.kill()
+      finish(`命令已中止：${command}`)
+      return
+    }
+    merged?.signal.addEventListener('abort', onAbort, { once: true })
+
+    timer = setTimeout(() => {
       timedOut = true
       child.kill()
-      resolve(`命令超时（${timeoutMs / 1000}s），已强制终止。已收集输出：\n${(stdout + stderr).slice(0, 1000)}`)
+      finish(`命令超时（${timeoutMs / 1000}s），已强制终止。已收集输出：\n${(stdout + stderr).slice(0, 1000)}`)
     }, timeoutMs)
 
     child.stdout?.on('data', (d) => { stdout += d.toString() })
@@ -391,15 +461,13 @@ function execForeground(command, timeoutMs) {
 
     child.on('close', (code) => {
       if (timedOut) return
-      clearTimeout(timer)
       const combined = (stdout + (stderr ? '\n[stderr]\n' + stderr : '')).slice(0, 3000)
-      resolve(`命令完成（exit code=${code}）\n${combined || '（无输出）'}`)
+      finish(`命令完成（exit code=${code}）\n${combined || '（无输出）'}`)
     })
 
     child.on('error', (err) => {
       if (timedOut) return
-      clearTimeout(timer)
-      resolve(`命令执行失败：${err.message}`)
+      finish(`命令执行失败：${err.message}`)
     })
   })
 }
@@ -425,7 +493,8 @@ async function execListProcesses() {
 }
 
 // fetch_url：获取网页内容，提取纯文本（带 TTL 缓存）
-async function execFetchUrl(args) {
+async function execFetchUrl(args, context = {}) {
+  throwIfAborted(context.signal)
   const url = args.url || args.URL || args.link
   if (!url) return '错误：未提供 URL'
 
@@ -441,15 +510,19 @@ async function execFetchUrl(args) {
 
   console.log(`[fetch_url] → ${url}`)
   let res
+  const merged = createMergedAbortSignal(context.signal, 10000)
   try {
     res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Jarvis/0.1)' },
-      signal: AbortSignal.timeout(10000),
+      signal: merged?.signal,
     })
   } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
     console.log(`[fetch_url] 失败: ${url} — ${err.message}`)
     return `请求失败：${err.message}（URL: ${url}）`
   }
+  merged?.cleanup()
   if (!res.ok) return `请求失败：HTTP ${res.status}（URL: ${url}）`
 
   const html = await res.text()

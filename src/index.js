@@ -5,7 +5,7 @@ import { runRecognizer } from './memory/recognizer.js'
 import { runInjector, formatMemoriesForPrompt, formatTaskKnowledge } from './memory/injector.js'
 import { gatherContext, formatExtraContext } from './context/gatherer.js'
 import { getDB, getConfig, setConfig, getKnownEntities, getOrInitBirthTime, insertConversation, insertMemory, getRecentConversationPartners, getDueReminders, markReminderFired, getNextPendingReminder } from './db.js'
-import { popMessage, hasMessages, setInterruptCallback, requeueMessage, pushMessage } from './queue.js'
+import { popMessage, hasMessages, hasUserMessages, getQueueSnapshot, setInterruptCallback, requeueMessage, pushMessage } from './queue.js'
 import { startTUI } from './tui.js'
 import { startAPI } from './api.js'
 import { emitEvent } from './events.js'
@@ -18,6 +18,13 @@ import { getCustomIntervalMs, consumeTick as consumeTickerTick, getStatus as get
 
 // 当前 LLM 处理的 AbortController（主循环打断用）
 let currentAbortController = null
+let currentExecution = null
+
+const PRIORITY = {
+  tick: 10,
+  background: 50,
+  user: 100,
+}
 
 // 初始化数据库
 getDB()
@@ -107,6 +114,45 @@ function buildToolContextForProcess(msg, injection) {
 
 const MAX_MESSAGE_RETRIES = 3
 
+function createAbortError(reason = 'Aborted') {
+  const err = new Error(reason)
+  err.name = 'AbortError'
+  return err
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError(signal.reason || 'Aborted')
+}
+
+function getProcessPriority(msg) {
+  if (!msg) return PRIORITY.tick
+  return typeof msg.priority === 'number' ? msg.priority : PRIORITY.background
+}
+
+function isFastUserMessage(msg) {
+  return !!msg && getProcessPriority(msg) >= PRIORITY.user
+}
+
+function shouldPreemptFor(entry) {
+  if (!entry || !processing || !currentExecution) return true
+  return (entry.priority || PRIORITY.background) > currentExecution.priority
+}
+
+function beginExecution({ priority, kind, label, controller }) {
+  currentAbortController = controller
+  currentExecution = {
+    priority,
+    kind,
+    label,
+    startedAt: Date.now(),
+  }
+}
+
+function clearExecution(controller) {
+  if (currentAbortController === controller) currentAbortController = null
+  if (currentExecution && currentAbortController === null) currentExecution = null
+}
+
 function enqueueDueReminders() {
   const now = new Date().toISOString()
   const dueReminders = getDueReminders(now, 20)
@@ -147,116 +193,133 @@ function handleLLMFailure(err, label, msg) {
 async function process(input, label, msg = null) {
   const sessionRef = newSessionRef()
   const isTick = !msg
+  const priority = getProcessPriority(msg)
+  const fastUserPath = isFastUserMessage(msg)
+  const controller = new AbortController()
+  let llmResult = null
+  let toolCallLog = []
 
   console.log(`\n── ${label} ──`)
   emitEvent(isTick ? 'tick' : 'message_received', { label, input: input.slice(0, 300) })
 
   // 用户消息已在 pushMessage 阶段写入 conversations（到达即入聊天记录），此处不再重复写。
-
-  currentAbortController = new AbortController()
-
-  // 1. 注入器
-  const injection = await runInjector({ message: input, state })
-  const memoriesText = formatMemoriesForPrompt(injection.memories, injection.recallMemories)
-  const directionsText = injection.directions.join('\n')
-  const taskKnowledgeText = formatTaskKnowledge(injection.taskKnowledge)
-
-  // 任务活跃时：运行上下文充分性采集循环
-  let extraContextText = ''
-  if (state.task) {
-    const extraContext = await gatherContext({
-      task: state.task,
-      taskKnowledge: taskKnowledgeText,
-      memories: memoriesText,
-      message: input,
-    })
-    extraContextText = formatExtraContext(extraContext)
-    if (extraContext.length > 0) {
-      console.log(`[采集器] 补充了 ${extraContext.length} 项上下文`)
-      emitEvent('context_gathered', { count: extraContext.length, items: extraContext.map(c => c.label) })
-    }
-  }
-
-  // 发出注入器结果事件（供 brain.html 展示）
-  emitEvent('injector_result', {
-    directions: injection.directions,
-    tools: injection.tools || [],
-    matchedMemories: (injection.memories || []).map(m => ({
-      id: m.id,
-      mem_id: m.mem_id || '',
-      event_type: m.event_type || '',
-      content: m.content || '',
-      detail: m.detail || '',
-    })),
-    recallMemories: (injection.recallMemories || []).map(m => ({
-      id: m.id,
-      mem_id: m.mem_id || '',
-      event_type: m.event_type || '',
-      content: m.content || '',
-      detail: m.detail || '',
-    })),
-    constraints: (injection.constraints || []).map(m => m.content),
-    thought: injection.thought || null,
-    lastToolResult: injection.lastToolResult
-      ? `${injection.lastToolResult.name}: ${String(injection.lastToolResult.result).slice(0, 120)}`
-      : null,
-    conversationWindow: (injection.conversationWindow || []).map(m => ({
-      role: m.role,
-      from_id: m.from_id,
-      to_id: m.to_id,
-      content: (m.content || '').slice(0, 120),
-      timestamp: m.timestamp,
-    })),
-    personMemory: injection.personMemory
-      ? { content: injection.personMemory.content, detail: injection.personMemory.detail || '' }
-      : null,
-  })
-
-  // 更新念头栈
-  if (injection.thought) {
-    state.thoughtStack.push(injection.thought)
-    if (state.thoughtStack.length > 3) state.thoughtStack.shift()
-  }
-
-  // 2. 组装系统提示词
-  const persona = getConfig('persona') || ''
-  const agentName = getConfig('agent_name') || 'Longma'
-  const entities = getKnownEntities()
-  const hasActiveTask = !!state.task
-  const systemPrompt = buildSystemPrompt({
-    agentName,
-    persona,
-    memories: memoriesText,
-    directions: directionsText,
-    constraints: injection.constraints || [],
-    conversationWindow: injection.conversationWindow || [],
-    personMemory: injection.personMemory || null,
-    thoughtStack: state.thoughtStack,
-    entities,
-    recentActions: state.recentActions,
-    actionLog: injection.actionLog || [],
-    hasActiveTask,
-    task: state.task || null,
-    taskKnowledge: taskKnowledgeText,
-    extraContext: extraContextText,
-    lastToolResult: injection.lastToolResult || null,
-    existenceDesc: describeExistence(birthTime),
-  })
-
-  // 发出完整系统提示词事件
-  emitEvent('system_prompt', { content: systemPrompt })
-
-  // 3. 调用 Jarvis LLM（可被新消息打断）
-  const toolCallLog = []
-  let llmResult
-  const toolContext = buildToolContextForProcess(msg, injection)
   try {
+    beginExecution({
+      priority,
+      kind: isTick ? 'tick' : (fastUserPath ? 'user' : 'background'),
+      label,
+      controller,
+    })
+
+    // 1. 注入器
+    const injection = await runInjector({ message: input, state })
+    throwIfAborted(controller.signal)
+
+    const directions = [...(injection.directions || [])]
+    if (fastUserPath) {
+      directions.unshift('当前是外部用户的实时消息。优先尽快理解并通过 send_message 直接回应，不要先做耗时工具调用或深度上下文采集；只有在回复离不开时才调用较重工具。')
+    }
+
+    const memoriesText = formatMemoriesForPrompt(injection.memories, injection.recallMemories)
+    const directionsText = directions.join('\n')
+    const taskKnowledgeText = formatTaskKnowledge(injection.taskKnowledge)
+
+    // 用户实时消息走快速路径：跳过重型上下文采集，避免被任务背景拖慢。
+    let extraContextText = ''
+    if (state.task && !fastUserPath) {
+      const extraContext = await gatherContext({
+        task: state.task,
+        taskKnowledge: taskKnowledgeText,
+        memories: memoriesText,
+        message: input,
+        signal: controller.signal,
+      })
+      throwIfAborted(controller.signal)
+      extraContextText = formatExtraContext(extraContext)
+      if (extraContext.length > 0) {
+        console.log(`[采集器] 补充了 ${extraContext.length} 项上下文`)
+        emitEvent('context_gathered', { count: extraContext.length, items: extraContext.map(c => c.label) })
+      }
+    }
+
+    // 发出注入器结果事件（供 brain.html 展示）
+    emitEvent('injector_result', {
+      directions,
+      tools: injection.tools || [],
+      matchedMemories: (injection.memories || []).map(m => ({
+        id: m.id,
+        mem_id: m.mem_id || '',
+        event_type: m.event_type || '',
+        content: m.content || '',
+        detail: m.detail || '',
+      })),
+      recallMemories: (injection.recallMemories || []).map(m => ({
+        id: m.id,
+        mem_id: m.mem_id || '',
+        event_type: m.event_type || '',
+        content: m.content || '',
+        detail: m.detail || '',
+      })),
+      constraints: (injection.constraints || []).map(m => m.content),
+      thought: injection.thought || null,
+      lastToolResult: injection.lastToolResult
+        ? `${injection.lastToolResult.name}: ${String(injection.lastToolResult.result).slice(0, 120)}`
+        : null,
+      conversationWindow: (injection.conversationWindow || []).map(m => ({
+        role: m.role,
+        from_id: m.from_id,
+        to_id: m.to_id,
+        content: (m.content || '').slice(0, 120),
+        timestamp: m.timestamp,
+      })),
+      personMemory: injection.personMemory
+        ? { content: injection.personMemory.content, detail: injection.personMemory.detail || '' }
+        : null,
+      fastUserPath,
+    })
+
+    // 更新念头栈
+    if (injection.thought) {
+      state.thoughtStack.push(injection.thought)
+      if (state.thoughtStack.length > 3) state.thoughtStack.shift()
+    }
+
+    // 2. 组装系统提示词
+    const persona = getConfig('persona') || ''
+    const agentName = getConfig('agent_name') || 'Longma'
+    const entities = getKnownEntities()
+    const hasActiveTask = !!state.task
+    const systemPrompt = buildSystemPrompt({
+      agentName,
+      persona,
+      memories: memoriesText,
+      directions: directionsText,
+      constraints: injection.constraints || [],
+      conversationWindow: injection.conversationWindow || [],
+      personMemory: injection.personMemory || null,
+      thoughtStack: state.thoughtStack,
+      entities,
+      recentActions: state.recentActions,
+      actionLog: injection.actionLog || [],
+      hasActiveTask,
+      task: state.task || null,
+      taskKnowledge: taskKnowledgeText,
+      extraContext: extraContextText,
+      lastToolResult: injection.lastToolResult || null,
+      existenceDesc: describeExistence(birthTime),
+    })
+
+    // 发出完整系统提示词事件
+    emitEvent('system_prompt', { content: systemPrompt, fastUserPath })
+
+    // 3. 调用 Jarvis LLM（可被新消息打断）
+    const toolContext = buildToolContextForProcess(msg, injection)
     llmResult = await callLLM({
       systemPrompt,
       message: input,
       tools: injection.tools || ['send_message'],
       maxTokens: undefined,
-      signal: currentAbortController.signal,
+      signal: controller.signal,
       toolContext,
       onToolCall: (name, args, result) => {
         emitEvent('tool_call', { name, args, result: String(result).slice(0, 1000) })
@@ -283,17 +346,17 @@ async function process(input, label, msg = null) {
         else if (event === 'end') emitEvent('stream_end', {})
       },
     })
+    throwIfAborted(controller.signal)
   } catch (err) {
     if (err.name === 'AbortError') {
       console.log('[系统] LLM 处理被打断（新消息到达）')
       llmResult = { content: '', toolResult: null, aborted: true }
     } else {
-      currentAbortController = null
       handleLLMFailure(err, label, msg)
       return
     }
   } finally {
-    currentAbortController = null
+    clearExecution(controller)
   }
 
   if (llmResult.aborted) {
@@ -409,7 +472,8 @@ async function onTick() {
     enqueueDueReminders()
     if (hasMessages()) {
       const msg = popMessage()
-      await process(msg.raw, `L1 消息 from ${msg.fromId}`, msg)
+      const lane = msg.queueName === 'background' ? 'BG' : 'L1'
+      await process(msg.raw, `${lane} 消息 from ${msg.fromId}`, msg)
     } else {
       const tick = formatTick()
       await process(tick, 'L2 TICK')
@@ -434,6 +498,8 @@ function scheduleNextTick() {
   enqueueDueReminders()
 
   const hasPending = hasMessages()
+  const hasPendingUser = hasUserMessages()
+  const queueSnapshot = getQueueSnapshot()
   const rateLimited = isRateLimited()
   const customMs = getCustomIntervalMs()
   const taskActive = !!state.task
@@ -441,9 +507,12 @@ function scheduleNextTick() {
 
   let interval
   let label
-  if (hasPending) {
+  if (hasPendingUser) {
     interval = 0
-    label = '立即（消息待处理）'
+    label = '立即（用户消息待处理）'
+  } else if (hasPending) {
+    interval = 0
+    label = '立即（后台消息待处理）'
   } else if (rateLimited) {
     interval = getTickInterval(config.tickInterval)
     label = `限流中（${interval / 1000}s）`
@@ -468,8 +537,8 @@ function scheduleNextTick() {
   }
 
   const quota = getQuotaStatus()
-  console.log(`[配额] ${quota.rpmUsed} RPM | ${quota.tpmUsed} TPM | 占用 ${quota.ratio} | 下次 Tick ${label}`)
-  emitEvent('quota', { ...quota, nextTickMs: interval, ticker: getTickerStatus() })
+  console.log(`[配额] ${quota.rpmUsed} RPM | ${quota.tpmUsed} TPM | 占用 ${quota.ratio} | 队列 U:${queueSnapshot.user} B:${queueSnapshot.background} | 下次 Tick ${label}`)
+  emitEvent('quota', { ...quota, nextTickMs: interval, ticker: getTickerStatus(), queue: queueSnapshot })
   currentTimer = setTimeout(async () => {
     currentTimer = null
     await onTick()
@@ -512,10 +581,16 @@ async function main() {
   setScheduler(scheduleNextTick)
 
   // 注册打断回调：新消息到达时打断当前 LLM 处理 + 立即触发下一轮（不等定时器）
-  setInterruptCallback(() => {
-    if (currentAbortController) {
-      console.log('[系统] 新消息到达，打断当前处理')
-      currentAbortController.abort()
+  setInterruptCallback((entry) => {
+    if (currentAbortController && shouldPreemptFor(entry)) {
+      console.log(`[系统] 更高优先级消息到达，打断当前处理：${entry.fromId} (${entry.queueName})`)
+      emitEvent('processing_preempted', {
+        by: entry.fromId,
+        queueName: entry.queueName,
+        priority: entry.priority,
+        current: currentExecution,
+      })
+      currentAbortController.abort('higher-priority-message')
     }
     triggerImmediateTick()
   })

@@ -29,8 +29,6 @@ D:\claude\Bailongma\
 ├─ scripts/             辅助脚本
 ├─ sandbox/             运行时文件沙盒
 ├─ data/                SQLite 数据目录
-├─ dashboard.html       前台面板
-├─ brain.html           脑监控页
 ├─ brain-ui.html        脑图形界面
 ├─ package.json
 └─ README.md
