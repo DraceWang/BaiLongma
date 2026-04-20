@@ -3,7 +3,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { spawn } from 'child_process'
 import { nowTimestamp } from '../time.js'
-import { searchMemories, insertMemory, normalizeConversationPartyId } from '../db.js'
+import { searchMemories, insertMemory, normalizeConversationPartyId, createReminder } from '../db.js'
 import { emitEvent } from '../events.js'
 import { callCapability, listCapabilities } from '../providers/registry.js'
 import { isDailyLimitReached } from '../quota.js'
@@ -86,6 +86,8 @@ export async function executeTool(name, args, context = {}) {
         return await execGenerateMusic(args)
       case 'set_tick_interval':
         return execSetTickInterval(args)
+      case 'schedule_reminder':
+        return await execScheduleReminder(args, context)
       default:
         return `错误：未知工具 "${name}"`
     }
@@ -130,6 +132,17 @@ function assertVisibleTargetId(targetId, visibleTargetIds = []) {
   throw new Error(`target_id "${targetId}" 未出现在当前二层注入的对话记录中：${normalizedVisible.join(', ')}`)
 }
 
+function parseReminderDueAt(value) {
+  if (!value || typeof value !== 'string') {
+    throw new Error('未提供 due_at')
+  }
+  const dueAt = new Date(value.trim())
+  if (Number.isNaN(dueAt.getTime())) {
+    throw new Error('due_at 必须是合法的 ISO 8601 绝对时间，例如 2026-04-21T06:00:00+08:00')
+  }
+  return dueAt
+}
+
 // express：表达器入口，根据 format 路由到对应输出渠道
 async function execExpress({ target_id, content, format = 'text' }, context = {}) {
   if (!content?.trim()) return '错误：未提供表达内容'
@@ -157,6 +170,38 @@ async function execSendMessage({ target_id, content }, context = {}) {
   console.log(`  时间：${timestamp}`)
   emitEvent('message', { from: 'consciousness', to: resolvedId, content, timestamp })
   return `消息已发送至 ${resolvedId}`
+}
+
+async function execScheduleReminder({ due_at, task, target_id }, context = {}) {
+  if (!task?.trim()) return '错误：未提供 task'
+
+  const dueAt = parseReminderDueAt(due_at)
+  if (dueAt.getTime() <= Date.now()) {
+    throw new Error('提醒时间必须晚于当前时间')
+  }
+
+  const fallbackTargetId = context.visibleTargetIds?.[0] || context.allowedTargetIds?.[0] || 'ID:000001'
+  const resolvedTargetId = resolveAllowedTargetId(target_id || fallbackTargetId, context.allowedTargetIds)
+  const taskText = task.trim()
+  const isoDueAt = dueAt.toISOString()
+  const systemMessage = `我是系统，根据你设置的提醒，你现在要为用户 ${resolvedTargetId} 执行这件事：${taskText}。请立即处理，并在需要时通过 send_message 把结果发给 ${resolvedTargetId}。`
+
+  const result = createReminder({
+    userId: resolvedTargetId,
+    dueAt: isoDueAt,
+    task: taskText,
+    systemMessage,
+    source: `tool:schedule_reminder@${nowTimestamp()}`,
+  })
+
+  emitEvent('reminder_created', {
+    id: Number(result.lastInsertRowid),
+    user_id: resolvedTargetId,
+    due_at: isoDueAt,
+    task: taskText,
+  })
+
+  return `提醒已创建：#${result.lastInsertRowid}，将在 ${isoDueAt} 触发，目标用户 ${resolvedTargetId}`
 }
 
 // read_file：读取文件内容

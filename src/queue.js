@@ -8,7 +8,7 @@ const queue = []
 let interruptCallback = null
 export function setInterruptCallback(fn) { interruptCallback = fn }
 
-export function pushMessage(fromId, content, channel = 'TUI') {
+export function pushMessage(fromId, content, channel = 'TUI', meta = {}) {
   const normalizedFromId = normalizeConversationPartyId(fromId)
   const timestamp = nowTimestamp()
   upsertEntity(normalizedFromId)
@@ -22,6 +22,7 @@ export function pushMessage(fromId, content, channel = 'TUI') {
     content,
     timestamp,
     channel,
+    ...meta,
   })
   // 通知主循环打断当前处理
   interruptCallback?.()

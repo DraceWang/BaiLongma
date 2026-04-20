@@ -246,6 +246,32 @@ export const TOOL_SCHEMAS = {
     }
   },
 
+  schedule_reminder: {
+    type: 'function',
+    function: {
+      name: 'schedule_reminder',
+      description: '创建一次性提醒。到达指定时间后，系统会主动向你发送一条第一人称系统消息，提醒你继续执行任务。due_at 必须是绝对时间的 ISO 8601 字符串。',
+      parameters: {
+        type: 'object',
+        properties: {
+          due_at: {
+            type: 'string',
+            description: '提醒触发时间，必须是绝对时间 ISO 8601 字符串，例如 2026-04-21T06:00:00+08:00'
+          },
+          task: {
+            type: 'string',
+            description: '到时间后你要执行的事项'
+          },
+          target_id: {
+            type: 'string',
+            description: '这条提醒最终服务的用户 ID，例如 ID:000001；默认使用当前对话对象'
+          }
+        },
+        required: ['due_at', 'task']
+      }
+    }
+  },
+
   generate_music: {
     type: 'function',
     function: {

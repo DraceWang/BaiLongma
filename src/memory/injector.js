@@ -176,7 +176,7 @@ export async function runInjector({ message, state, hint = '' }) {
   const baseTools = [
     'send_message', 'fetch_url', 'list_dir', 'read_file', 'write_file',
     'delete_file', 'make_dir', 'exec_command', 'kill_process', 'list_processes',
-    'set_tick_interval',
+    'set_tick_interval', 'schedule_reminder',
   ]
   if (senderId || state?.prev_recall) baseTools.push('search_memory')
   const tools = [...new Set(baseTools)]

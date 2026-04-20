@@ -4,8 +4,8 @@ import { buildSystemPrompt } from './prompt.js'
 import { runRecognizer } from './memory/recognizer.js'
 import { runInjector, formatMemoriesForPrompt, formatTaskKnowledge } from './memory/injector.js'
 import { gatherContext, formatExtraContext } from './context/gatherer.js'
-import { getDB, getConfig, setConfig, getKnownEntities, getOrInitBirthTime, insertConversation, insertMemory, getRecentConversationPartners } from './db.js'
-import { popMessage, hasMessages, setInterruptCallback, requeueMessage } from './queue.js'
+import { getDB, getConfig, setConfig, getKnownEntities, getOrInitBirthTime, insertConversation, insertMemory, getRecentConversationPartners, getDueReminders, markReminderFired, getNextPendingReminder } from './db.js'
+import { popMessage, hasMessages, setInterruptCallback, requeueMessage, pushMessage } from './queue.js'
 import { startTUI } from './tui.js'
 import { startAPI } from './api.js'
 import { emitEvent } from './events.js'
@@ -70,13 +70,32 @@ export function buildToolContext({ currentTargetId = null, conversationWindow = 
 
 function buildToolContextForProcess(msg, injection) {
   return buildToolContext({
-    currentTargetId: msg?.fromId || null,
+    currentTargetId: msg?.reminderTargetId || msg?.fromId || null,
     conversationWindow: injection.conversationWindow || [],
     includeRecentPartners: true,
   })
 }
 
 const MAX_MESSAGE_RETRIES = 3
+
+function enqueueDueReminders() {
+  const now = new Date().toISOString()
+  const dueReminders = getDueReminders(now, 20)
+  for (const reminder of dueReminders) {
+    const marked = markReminderFired(reminder.id, now)
+    if (!marked.changes) continue
+    pushMessage('SYSTEM', reminder.system_message, 'REMINDER', {
+      reminderTargetId: reminder.user_id,
+      reminderId: reminder.id,
+    })
+    emitEvent('reminder_fired', {
+      id: reminder.id,
+      user_id: reminder.user_id,
+      due_at: reminder.due_at,
+      task: reminder.task,
+    })
+  }
+}
 
 // LLM 失败后的通用处理：429 设限流，消息重入队列，超限放弃
 function handleLLMFailure(err, label, msg) {
@@ -360,6 +379,7 @@ async function onTick() {
   processing = true
 
   try {
+    enqueueDueReminders()
     if (hasMessages()) {
       const msg = popMessage()
       await process(msg.raw, `L1 消息 from ${msg.fromId}`, msg)
@@ -384,10 +404,13 @@ function scheduleNextTick() {
   if (!isRunning()) return
   if (currentTimer) { clearTimeout(currentTimer); currentTimer = null }
 
+  enqueueDueReminders()
+
   const hasPending = hasMessages()
   const rateLimited = isRateLimited()
   const customMs = getCustomIntervalMs()
   const taskActive = !!state.task
+  const nextReminder = getNextPendingReminder()
 
   let interval
   let label
@@ -407,6 +430,14 @@ function scheduleNextTick() {
   } else {
     interval = config.tickInterval
     label = `${interval / 1000}s`
+  }
+
+  if (nextReminder) {
+    const dueInMs = Math.max(0, new Date(nextReminder.due_at).getTime() - Date.now())
+    if (dueInMs < interval) {
+      interval = dueInMs
+      label = `提醒触发 ${Math.ceil(dueInMs / 1000)}s`
+    }
   }
 
   const quota = getQuotaStatus()

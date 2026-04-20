@@ -118,6 +118,22 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_action_logs_timestamp ON action_logs(timestamp);
   `)
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reminders (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id        TEXT    NOT NULL,
+      due_at         TEXT    NOT NULL,
+      task           TEXT    NOT NULL,
+      system_message TEXT    NOT NULL,
+      status         TEXT    NOT NULL DEFAULT 'pending',
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+      fired_at       TEXT,
+      cancelled_at   TEXT,
+      source         TEXT    DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_reminders_due_at ON reminders(status, due_at);
+  `)
+
   // 重建 FTS 索引（覆盖已有数据，确保历史记忆也被索引）
   db.exec(`INSERT INTO memories_fts(memories_fts) VALUES('rebuild')`)
 }
@@ -843,6 +859,53 @@ export function getRecentActionLogs(limit = 50) {
   return db.prepare(`
     SELECT * FROM action_logs ORDER BY id DESC LIMIT ?
   `).all(limit).reverse()
+}
+
+export function createReminder({ userId, dueAt, task, systemMessage, source = '' }) {
+  const db = getDB()
+  const normalizedUserId = normalizeConversationPartyId(userId || CANONICAL_USER_ID)
+  return db.prepare(`
+    INSERT INTO reminders (user_id, due_at, task, system_message, status, source)
+    VALUES (?, ?, ?, ?, 'pending', ?)
+  `).run(normalizedUserId, dueAt, task, systemMessage, source)
+}
+
+export function getDueReminders(now = new Date().toISOString(), limit = 20) {
+  const db = getDB()
+  return db.prepare(`
+    SELECT * FROM reminders
+    WHERE status = 'pending' AND due_at <= ?
+    ORDER BY due_at ASC, id ASC
+    LIMIT ?
+  `).all(now, limit)
+}
+
+export function markReminderFired(id, firedAt = new Date().toISOString()) {
+  const db = getDB()
+  return db.prepare(`
+    UPDATE reminders
+    SET status = 'fired', fired_at = ?
+    WHERE id = ? AND status = 'pending'
+  `).run(firedAt, id)
+}
+
+export function cancelReminder(id, cancelledAt = new Date().toISOString()) {
+  const db = getDB()
+  return db.prepare(`
+    UPDATE reminders
+    SET status = 'cancelled', cancelled_at = ?
+    WHERE id = ? AND status = 'pending'
+  `).run(cancelledAt, id)
+}
+
+export function getNextPendingReminder() {
+  const db = getDB()
+  return db.prepare(`
+    SELECT * FROM reminders
+    WHERE status = 'pending'
+    ORDER BY due_at ASC, id ASC
+    LIMIT 1
+  `).get() || null
 }
 
 // 按关键词搜索记忆（FTS5 全文搜索，优先相关度排序）
