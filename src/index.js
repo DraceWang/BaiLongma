@@ -1,6 +1,5 @@
 import { config } from './config.js'
 import { callLLM } from './llm.js'
-import { runLayer1 } from './layer1.js'
 import { buildSystemPrompt } from './prompt.js'
 import { runRecognizer } from './memory/recognizer.js'
 import { runInjector, formatMemoriesForPrompt, formatTaskKnowledge } from './memory/injector.js'
@@ -31,8 +30,7 @@ if (persistedTask) {
 }
 
 // 注册 Provider（多媒体能力用 MiniMax，独立于 LLM 选择）
-// 注意：本文件第 102 行有 `function process(...)` 声明会遮蔽全局 process，
-// 所以用 globalThis.process 访问环境变量。
+// 本文件下方的 `function process(...)` 会遮蔽全局 process，所以用 globalThis.process 访问环境变量。
 const MINIMAX_API_KEY_ENV = globalThis.process.env.MINIMAX_API_KEY
 if (MINIMAX_API_KEY_ENV) {
   registerProvider(new MinimaxProvider({ apiKey: MINIMAX_API_KEY_ENV }))
@@ -70,12 +68,9 @@ export function buildToolContext({ currentTargetId = null, conversationWindow = 
   return { allowedTargetIds: unique, visibleTargetIds: unique }
 }
 
-function buildToolContextFromLabel(label, injection) {
-  const currentTargetId = label.startsWith('消息 from ')
-    ? label.slice('消息 from '.length).trim()
-    : null
+function buildToolContextForProcess(msg, injection) {
   return buildToolContext({
-    currentTargetId,
+    currentTargetId: msg?.fromId || null,
     conversationWindow: injection.conversationWindow || [],
     includeRecentPartners: true,
   })
@@ -103,84 +98,17 @@ function handleLLMFailure(err, label, msg) {
 
 async function process(input, label, msg = null) {
   const sessionRef = newSessionRef()
-  const isTick = label === 'TICK' || label.startsWith('TICK ')
+  const isTick = !msg
 
   console.log(`\n── ${label} ──`)
   emitEvent(isTick ? 'tick' : 'message_received', { label, input: input.slice(0, 300) })
 
   // 用户消息已在 pushMessage 阶段写入 conversations（到达即入聊天记录），此处不再重复写。
 
-  // ── L1 预思考：收到他者消息时先过一层思考器，能直接回就短回复，不然交给 L2 ──
   currentAbortController = new AbortController()
-  let l1ThoughtPushed = false
-  let l1Hint = '' // L1 next_thinker 输出，供 L2 注入器扩展记忆检索
 
-  if (!isTick && msg && msg.fromId && msg.fromId !== 'jarvis') {
-    // L1 也通过 send_message 真发消息，需要带上 toolContext 校验目标 ID
-    const l1ToolContext = buildToolContext({
-      currentTargetId: msg.fromId,
-      conversationWindow: [],
-    })
-    let l1
-    try {
-      l1 = await runLayer1({
-        input,
-        state,
-        sessionRef,
-        signal: currentAbortController.signal,
-        toolContext: l1ToolContext,
-      })
-    } catch (err) {
-      handleLLMFailure(err, `L1 ${label}`, msg)
-      currentAbortController = null
-      return
-    }
-
-    if (l1.injection?.thought) {
-      state.thoughtStack.push(l1.injection.thought)
-      if (state.thoughtStack.length > 3) state.thoughtStack.shift()
-      l1ThoughtPushed = true
-    }
-
-    if (l1.aborted) {
-      // 微信式打断：丢弃本次半成品（不存 snapshot、不跑 recognizer），
-      // 下轮处理最新消息时，本条消息已在 conversationWindow 里作为上下文可见。
-      console.log('[系统] L1 被新消息打断，丢弃半成品')
-      currentAbortController = null
-      return
-    }
-
-    if (l1.mode === 'l1_reply' && l1.sentMessages?.length > 0) {
-      // L1 通过 send_message 工具已经真正发出消息（emit + insertConversation 在 layer1 onToolCall 中完成）
-      const responseContent = l1.sentMessages.map(m => m.content).join('\n')
-      emitEvent('response', { sessionRef, label, content: responseContent })
-      console.log(`\nJarvis (L1): ${responseContent}`)
-
-      for (const sm of l1.sentMessages) {
-        state.recentActions.push({ ts: sm.ts, summary: `send_message → ${sm.targetId}` })
-      }
-      if (state.recentActions.length > 5) {
-        state.recentActions = state.recentActions.slice(-5)
-      }
-
-      // 识别器后台运行，不阻塞下一轮消息/TICK 处理
-      runRecognizer({
-        userMessage: input, jarvisThink: '', jarvisResponse: responseContent,
-        toolCallLog: l1.toolCallLog || [], task: state.task, sessionRef,
-      }).then(memories => {
-        emitEvent('memories_written', { count: memories?.length || 0, memories: memories || [] })
-      }).catch(err => {
-        console.error('[识别器] 后台运行失败:', err)
-      })
-      currentAbortController = null
-      return
-    }
-    // next_thinker：继续走 L2 流程，controller 保留
-    l1Hint = l1.content || ''
-  }
-
-  // 1. 注入器（带上 L1 hint，让 L2 在更大关键词集合里搜记忆）
-  const injection = await runInjector({ message: input, state, hint: l1Hint })
+  // 1. 注入器
+  const injection = await runInjector({ message: input, state })
   const memoriesText = formatMemoriesForPrompt(injection.memories, injection.recallMemories)
   const directionsText = injection.directions.join('\n')
   const taskKnowledgeText = formatTaskKnowledge(injection.taskKnowledge)
@@ -206,11 +134,15 @@ async function process(input, label, msg = null) {
     directions: injection.directions,
     tools: injection.tools || [],
     matchedMemories: (injection.memories || []).map(m => ({
+      id: m.id,
+      mem_id: m.mem_id || '',
       event_type: m.event_type || '',
       content: m.content || '',
       detail: m.detail || '',
     })),
     recallMemories: (injection.recallMemories || []).map(m => ({
+      id: m.id,
+      mem_id: m.mem_id || '',
       event_type: m.event_type || '',
       content: m.content || '',
       detail: m.detail || '',
@@ -232,8 +164,8 @@ async function process(input, label, msg = null) {
       : null,
   })
 
-  // 更新念头栈（若 L1 已推入则跳过，避免同一条消息双推）
-  if (injection.thought && !l1ThoughtPushed) {
+  // 更新念头栈
+  if (injection.thought) {
     state.thoughtStack.push(injection.thought)
     if (state.thoughtStack.length > 3) state.thoughtStack.shift()
   }
@@ -264,11 +196,10 @@ async function process(input, label, msg = null) {
   // 发出完整系统提示词事件
   emitEvent('system_prompt', { content: systemPrompt })
 
-  // 3. 调用 Jarvis LLM（可被新消息打断；controller 在 L1 阶段或此处已初始化）
+  // 3. 调用 Jarvis LLM（可被新消息打断）
   const toolCallLog = []
   let llmResult
-  const toolContext = buildToolContextFromLabel(label, injection)
-  if (!currentAbortController) currentAbortController = new AbortController()
+  const toolContext = buildToolContextForProcess(msg, injection)
   try {
     llmResult = await callLLM({
       systemPrompt,
@@ -312,7 +243,7 @@ async function process(input, label, msg = null) {
 
   if (llmResult.aborted) {
     // 微信式打断：丢弃半成品，下轮处理最新消息时从 conversationWindow 自然读到本条上下文。
-    console.log('[系统] L2 被新消息打断，丢弃半成品')
+    console.log('[系统] 当前处理被新消息打断，丢弃半成品')
     return
   }
 
@@ -324,8 +255,8 @@ async function process(input, label, msg = null) {
   console.log('\nJarvis:', response)
   emitEvent('response', { sessionRef, label, content: response })
 
-  // L2 救援：模型在 L2 输出 <l1_reply>/<final_reply> 文本但未调 send_message —— 视作要回复的他者消息
-  if (msg && msg.fromId && !isTick && !toolCallLog.some(t => t.name === 'send_message')) {
+  // 标签救援：模型输出 <l1_reply>/<final_reply> 文本但未调 send_message —— 视作要回复的他者消息
+  if (msg && msg.fromId && !toolCallLog.some(t => t.name === 'send_message')) {
     const tagMatch = response.match(/<l1_reply>([\s\S]*?)<\/l1_reply>/i)
       || response.match(/<final_reply>([\s\S]*?)<\/final_reply>/i)
     const rescued = tagMatch?.[1]?.trim()
@@ -334,10 +265,10 @@ async function process(input, label, msg = null) {
       const timestamp = nowTimestamp()
       insertConversation({ role: 'jarvis', from_id: 'jarvis', to_id: targetId, content: rescued, timestamp })
       emitEvent('message', { from: 'consciousness', to: targetId, content: rescued, timestamp })
-      toolCallLog.push({ name: 'send_message', args: { target_id: targetId, content: rescued }, result: `消息已发送至 ${targetId}（L2 标签救援）` })
+      toolCallLog.push({ name: 'send_message', args: { target_id: targetId, content: rescued }, result: `消息已发送至 ${targetId}（标签救援）` })
       state.recentActions.push({ ts: timestamp, summary: `send_message → ${targetId}` })
       if (state.recentActions.length > 5) state.recentActions.shift()
-      console.log(`[L2 救援] Jarvis → ${targetId}: ${rescued}`)
+      console.log(`[标签救援] Jarvis → ${targetId}: ${rescued}`)
     }
   }
 
@@ -428,10 +359,10 @@ async function onTick() {
   try {
     if (hasMessages()) {
       const msg = popMessage()
-      await process(msg.raw, `消息 from ${msg.fromId}`, msg)
+      await process(msg.raw, `L1 消息 from ${msg.fromId}`, msg)
     } else {
       const tick = formatTick()
-      await process(tick, 'TICK')
+      await process(tick, 'L2 TICK')
     }
   } finally {
     processing = false

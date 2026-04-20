@@ -382,14 +382,118 @@ body {
 }
 
 .line-tool {
-  font-size: 10px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  opacity: 0.85;
+  font-size: 11px;
+  opacity: 0.92;
   padding-left: 13px;
-  margin-top: 4px;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.line-tool .tool-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.4px solid currentColor;
+  border-top-color: transparent;
+  opacity: 0.9;
+  animation: tool-spin 1.1s linear infinite;
+  flex-shrink: 0;
+}
+
+.line-tool.done .tool-spinner {
+  animation: none;
+  border-top-color: currentColor;
+  opacity: 0.5;
+}
+
+.line-tool .tool-name {
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.line-tool .tool-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.line-tool .tool-status {
+  margin-left: auto;
+  font-size: 9px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+}
+
+.line-tool .tool-status.success {
+  color: #7fcf8f;
+  border-color: rgba(127, 207, 143, 0.4);
+  background: rgba(127, 207, 143, 0.08);
+}
+
+.line-tool .tool-status.failed {
+  color: #e07878;
+  border-color: rgba(224, 120, 120, 0.4);
+  background: rgba(224, 120, 120, 0.08);
+}
+
+.line-tool-detail {
+  font-size: 10px;
+  color: var(--ink2);
+  padding-left: 26px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.78;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  line-height: 1.55;
+}
+
+@keyframes tool-spin {
+  to { transform: rotate(360deg); }
+}
+
+.line-thinking {
+  font-size: 12px;
+  color: var(--ink2);
+  padding-left: 13px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  letter-spacing: 0.04em;
+}
+
+.line-thinking .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: think-dot 1.2s ease-in-out infinite;
+}
+
+.line-thinking .dot:nth-child(2) { animation-delay: 0.15s; }
+.line-thinking .dot:nth-child(3) { animation-delay: 0.3s; }
+.line-thinking .dot:nth-child(4) { animation-delay: 0.45s; }
+
+.line-thinking.done .dot {
+  animation: none;
+  opacity: 0.25;
+}
+
+@keyframes think-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
 }
 
 .cursor {
@@ -689,12 +793,13 @@ body {
 .reset-view {
   position: relative;
   z-index: 1;
-  padding: 6px 12px;
-  border-radius: 999px;
+  padding: 10px 14px;
+  border-radius: 16px;
   border: 1px solid var(--line-strong);
   background: var(--panel);
   backdrop-filter: blur(36px);
-  color: var(--dim);
+  -webkit-backdrop-filter: blur(18px);
+  color: var(--ink);
   font-size: 10px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   letter-spacing: 0.14em;
@@ -702,11 +807,11 @@ body {
   cursor: pointer;
   opacity: 0;
   transform: translateY(10px);
-  transition: opacity 0.3s ease, transform 0.3s ease, color 0.18s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease, color 0.18s ease, background 0.6s ease, border-color 0.6s ease;
 }
 
 .reset-view.visible { opacity: 1; transform: translateY(0); }
-.reset-view:hover { color: var(--ink); }
+.reset-view:hover { color: var(--warm); }
 
 .physics-control {
   position: relative;
@@ -835,8 +940,8 @@ body {
 
   <div class="stream-meta">
     <div>
-      <div class="stream-title-text">L1 · Perception</div>
-      <div class="stream-subtitle">input · recall · match</div>
+      <div class="stream-title-text">L1 · Message</div>
+      <div class="stream-subtitle">user message · react</div>
     </div>
     <span class="pill" id="pill-l1">LIVE</span>
   </div>
@@ -906,8 +1011,8 @@ body {
 
   <div class="stream-meta">
     <div>
-      <div class="stream-title-text">L2 · Reasoning</div>
-      <div class="stream-subtitle">plan · think · tool · stream</div>
+      <div class="stream-title-text">L2 · Tick</div>
+      <div class="stream-subtitle">heartbeat · think · tool</div>
     </div>
     <span class="pill pill-warm" id="pill-l2">STREAMING</span>
   </div>
@@ -1737,19 +1842,88 @@ function addNewNodes(memories) {
 setInterval(() => naturalTwitch(), 3000);
 setInterval(() => { nodeData.forEach(n => { if (n._strength) n._strength *= 0.97; }); }, 2500);
 
+const TOOL_ZH = {
+  send_message: "发送消息",
+  express: "表达",
+  read_file: "读取文件",
+  write_file: "写入文件",
+  delete_file: "删除文件",
+  make_dir: "创建目录",
+  list_dir: "查看目录",
+  exec_command: "执行命令",
+  kill_process: "终止进程",
+  list_processes: "列出进程",
+  fetch_url: "抓取网页",
+  search_memory: "检索记忆",
+  set_tick_interval: "调整节奏",
+  speak: "朗读",
+  generate_lyrics: "生成歌词",
+  generate_music: "生成音乐",
+  generate_image: "生成图片",
+};
+
+const TOOL_ICON = {
+  send_message: "💬",
+  express: "🗣️",
+  read_file: "📄",
+  write_file: "✏️",
+  delete_file: "🗑️",
+  make_dir: "📁",
+  list_dir: "📂",
+  exec_command: "⚡",
+  kill_process: "🛑",
+  list_processes: "📋",
+  fetch_url: "🌐",
+  search_memory: "🔍",
+  set_tick_interval: "⏱️",
+  speak: "🔊",
+  generate_lyrics: "🎵",
+  generate_music: "🎼",
+  generate_image: "🎨",
+};
+
+function parseUserMessageInput(raw) {
+  const text = String(raw || "");
+  const match = text.match(/^\[([^\]]+)\]\s+(\S+)\s+\[([^\]]+)\]\s+([\s\S]*)$/);
+  if (!match) return { content: text.trim(), time: null };
+  return { fromId: match[1], timestamp: match[2], channel: match[3], content: match[4].trim(), time: formatMsgTime(match[2]) };
+}
+
+function formatMsgTime(stamp) {
+  if (!stamp) return null;
+  const m = String(stamp).match(/T(\d{2}):(\d{2}):(\d{2})/);
+  if (m) return `${m[1]}:${m[2]}:${m[3]}`;
+  const m2 = String(stamp).match(/(\d{2}):(\d{2}):(\d{2})/);
+  if (m2) return `${m2[1]}:${m2[2]}:${m2[3]}`;
+  return null;
+}
+
+function isFailureResult(resultStr) {
+  const t = (resultStr || "").trim();
+  if (!t) return false;
+  return /^(错误|失败|异常)[：:]/.test(t) || /^Error\b/i.test(t) || /^ERROR\b/.test(t);
+}
+
 class ThoughtStream {
-  constructor(innerId, color) {
+  constructor(innerId, color, options = {}) {
     this.el = document.getElementById(innerId);
     this.color = color;
+    this.thinkingLabel = options.thinkingLabel || "思考中";
+    this.thinkingDoneLabel = options.thinkingDoneLabel || null;
+    this.toolDetailLength = options.toolDetailLength || 160;
     this.MAX = 8;
     this.startedAt = Date.now();
     this.curLine = null;
-    this.curText = null;
+    this.thinkingEl = null;
+    this.lastToolEl = null;
   }
 
   tStamp() {
-    const sec = (Date.now() - this.startedAt) / 1000;
-    return sec.toFixed(3).padStart(6, "0");
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
   }
 
   trim() {
@@ -1761,24 +1935,36 @@ class ThoughtStream {
     }
   }
 
-  newLine(type = "stream") {
+  newLine(type = "stream", options = {}) {
+    // 关闭上一条工具的旋转动画
+    this.finalizeLastTool();
+    this.thinkingLine = null;
+
     this.curLine = document.createElement("div");
     this.curLine.className = "stream-line";
 
     const color = readCSSVar(`--${this.color}`);
+    const timeLabel = options.time || this.tStamp();
 
     const header = document.createElement("div");
     header.className = "line-header";
     header.innerHTML = `
       <span class="line-dot" style="background:${color}"></span>
-      <span class="line-type" style="color:${color}">${type}</span>
-      <span class="line-time">${this.tStamp()}</span>
+      <span class="line-type" style="color:${color}"></span>
+      <span class="line-time"></span>
     `;
+    header.querySelector(".line-type").textContent = type;
+    header.querySelector(".line-time").textContent = timeLabel;
     this.curLine.appendChild(header);
 
-    this.curText = document.createElement("div");
-    this.curText.className = "line-text";
-    this.curLine.appendChild(this.curText);
+    if (options.content) {
+      const textEl = document.createElement("div");
+      textEl.className = "line-text";
+      textEl.textContent = options.content;
+      this.curLine.appendChild(textEl);
+    }
+
+    this.thinkingEl = null;
 
     this.el.insertBefore(this.curLine, this.el.firstChild);
     this.trim();
@@ -1790,34 +1976,125 @@ class ThoughtStream {
     this.curLine.scrollIntoView({ block: "end", inline: "nearest" });
   }
 
-  append(text) {
-    if (!this.curText) this.newLine("stream");
-    this.curText.textContent += text;
+  // 开启一轮思考：若本轮已有思考行，则复用该行并恢复动画
+  startThinkingSession() {
+    if (this.thinkingLine && this.thinkingLine.parentElement) {
+      this.curLine = this.thinkingLine;
+      const typeSpan = this.curLine.querySelector(".line-type");
+      if (typeSpan) typeSpan.textContent = this.thinkingLabel;
+      const timeSpan = this.curLine.querySelector(".line-time");
+      if (timeSpan) timeSpan.textContent = this.tStamp();
+    } else {
+      this.newLine(this.thinkingLabel);
+      this.thinkingLine = this.curLine;
+    }
+    this.startThinking();
+  }
+
+  // 思考中动画：仅显示动画圆点；标签通过 line-type 呈现
+  startThinking() {
+    if (!this.curLine) {
+      this.newLine(this.thinkingLabel);
+      this.thinkingLine = this.curLine;
+    }
+    if (this.thinkingEl) return;
+    const el = document.createElement("div");
+    el.className = "line-thinking";
+    el.style.color = readCSSVar(`--${this.color}`);
+    el.innerHTML = `<span class="dot"></span><span class="dot"></span><span class="dot"></span>`;
+    this.curLine.appendChild(el);
+    this.thinkingEl = el;
     this.scrollToLatest();
   }
 
-  tool(name, args) {
-    if (!this.curLine) this.newLine("tool");
-    const summary = Object.entries(args || {})
-      .slice(0, 2)
-      .map(([k, v]) => `${k}=${String(v).slice(0, 28)}`)
-      .join(" ");
+  stopThinking() {
+    if (this.thinkingEl) {
+      this.thinkingEl.classList.add("done");
+      if (this.thinkingDoneLabel) {
+        const line = this.thinkingEl.parentElement;
+        const typeSpan = line && line.querySelector(".line-type");
+        if (typeSpan) typeSpan.textContent = this.thinkingDoneLabel;
+      }
+    }
+    this.thinkingEl = null;
+  }
+
+  finalizeLastTool() {
+    if (this.lastToolEl) {
+      this.lastToolEl.classList.add("done");
+      this.lastToolEl = null;
+    }
+  }
+
+  // 显示中文工具名 + 图标 + 成功/失败状态 + 结果摘要
+  tool(name, args, result) {
+    if (!this.curLine) this.newLine("工具调用");
+    this.finalizeLastTool();
+
+    const zh = TOOL_ZH[name] || name;
+    const icon = TOOL_ICON[name] || "🔧";
+    const resultStr = result == null ? "" : String(result);
+    const failure = isFailureResult(resultStr);
+    const statusCls = failure ? "failed" : "success";
+    const statusIcon = failure ? "✗" : "✓";
+    const statusLabel = failure ? "失败" : "成功";
+
     const toolEl = document.createElement("div");
-    toolEl.className = "line-tool";
+    toolEl.className = `line-tool done tool-${statusCls}`;
     toolEl.style.color = readCSSVar(`--${this.color}`);
-    toolEl.textContent = `→ ${name}(${summary})`;
+
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "tool-icon";
+    iconSpan.textContent = icon;
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "tool-name";
+    nameSpan.textContent = zh;
+    const statusSpan = document.createElement("span");
+    statusSpan.className = `tool-status ${statusCls}`;
+    statusSpan.textContent = `${statusIcon} ${statusLabel}`;
+    toolEl.appendChild(iconSpan);
+    toolEl.appendChild(nameSpan);
+    toolEl.appendChild(statusSpan);
     this.curLine.appendChild(toolEl);
+
+    const trimmed = resultStr.trim();
+    if (trimmed) {
+      const detail = document.createElement("div");
+      detail.className = "line-tool-detail";
+      const snippet = trimmed.replace(/\s+/g, " ");
+      detail.textContent = snippet.length > this.toolDetailLength
+        ? snippet.slice(0, this.toolDetailLength) + "…"
+        : snippet;
+      this.curLine.appendChild(detail);
+    }
+
     this.scrollToLatest();
+    this.lastToolEl = null;
   }
 
   end() {
+    this.stopThinking();
+    this.finalizeLastTool();
     this.curLine = null;
-    this.curText = null;
+    this.thinkingLine = null;
   }
 }
 
-const L1 = new ThoughtStream("si-l1", "cool");
-const L2 = new ThoughtStream("si-l2", "warm");
+const L1 = new ThoughtStream("si-l1", "cool", {
+  thinkingLabel: "正在思考中",
+  thinkingDoneLabel: "思考完成",
+  toolDetailLength: 140,
+});
+const L2 = new ThoughtStream("si-l2", "warm", {
+  thinkingLabel: "思考中",
+  toolDetailLength: 220,
+});
+
+// L1 = 用户消息触发的处理流；L2 = TICK 触发的处理流。
+// 后端 emit 的 stream_*/tool_call 事件不带路径标记，
+// 通过最近一次 message_received / tick 事件来决定路由到哪块面板。
+let currentPath = "l2";
+function currentStream() { return currentPath === "l1" ? L1 : L2; }
 
 let tokenAccum = 0;
 let tokenWindow = Date.now();
@@ -1860,36 +2137,35 @@ function extractNids(memList) {
 
 function handle({ type, data = {} }) {
   switch (type) {
-    case "layer1_start":
-      L1.newLine("perceive");
-      break;
-    case "layer1_chunk":
-      L1.append(data.text || "");
-      bumpTokens(data.text);
-      break;
-    case "layer1_stream_end":
-      L1.end();
-      break;
-    case "layer1_tool":
-      L1.tool(data.name, data.args);
-      break;
-    case "layer1_injector_result": {
-      const nids = extractNids(data.matchedMemories);
-      if (nids.length) highlightNodes(nids, 10000);
+    case "message_received": {
+      currentPath = "l1";
+      const parsed = parseUserMessageInput(data.input);
+      L1.newLine("收到用户消息", {
+        content: parsed.content,
+        time: parsed.time || undefined,
+      });
       break;
     }
-    case "layer2_start":
-      L2.newLine("think");
+    case "tick":
+      currentPath = "l2";
+      L2.newLine("心跳 💗");
+      break;
+    case "stream_start":
+      currentStream().startThinkingSession();
       break;
     case "stream_chunk":
-      L2.append(data.text || "");
+      // 不再显示具体思考内容，仅用于驱动 token 速率指示
       bumpTokens(data.text);
       break;
     case "stream_end":
-      L2.end();
+      currentStream().stopThinking();
       break;
     case "tool_call":
-      L2.tool(data.name, data.args);
+      currentStream().tool(data.name, data.args, data.result);
+      break;
+    case "response":
+      // 一轮完成：停所有动画
+      currentStream().end();
       break;
     case "injector_result": {
       const nids = [...extractNids(data.matchedMemories), ...extractNids(data.recallMemories)];
