@@ -893,7 +893,6 @@ class ThoughtStream {
     this.thinkingLabel = options.thinkingLabel || "思考中";
     this.thinkingDoneLabel = options.thinkingDoneLabel || null;
     this.toolDetailLength = options.toolDetailLength || 160;
-    this.MAX = 8;
     this.startedAt = Date.now();
     this.curLine = null;
     this.thinkingEl = null;
@@ -912,11 +911,9 @@ class ThoughtStream {
   }
 
   trim() {
-    while (this.el.children.length > this.MAX) {
-      const old = this.el.firstChild;
-      old.classList.add("fading");
-      setTimeout(() => old.remove(), 520);
-      break;
+    if (!this.scroller) return;
+    while (this.el.children.length > 1 && this.scroller.scrollHeight > this.scroller.clientHeight + 4) {
+      this.el.firstChild?.remove();
     }
   }
 
