@@ -3,7 +3,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { spawn } from 'child_process'
 import { nowTimestamp } from '../time.js'
-import { searchMemories, insertMemory, normalizeConversationPartyId, createReminder } from '../db.js'
+import { searchMemories, insertMemory, normalizeConversationPartyId, createReminder, upsertPrefetchTask, removePrefetchTask, listPrefetchTasks } from '../db.js'
 import { emitEvent } from '../events.js'
 import { callCapability, listCapabilities } from '../providers/registry.js'
 import { isDailyLimitReached } from '../quota.js'
@@ -129,6 +129,8 @@ export async function executeTool(name, args, context = {}) {
         return execSetTickInterval(args)
       case 'schedule_reminder':
         return await execScheduleReminder(args, context)
+      case 'manage_prefetch_task':
+        return execManagePrefetchTask(args)
       default:
         return `错误：未知工具 "${name}"`
     }
@@ -633,6 +635,33 @@ async function execGenerateMusic({ prompt, lyrics, instrumental }) {
   emitEvent('music_created', { path: relPath, prompt: prompt.slice(0, 60) })
   console.log(`[music] 已生成: ${relPath}`)
   return `音乐已生成：${relPath}（时长约 ${result.duration ?? '?'} 秒）`
+}
+
+// manage_prefetch_task：管理预热任务
+function execManagePrefetchTask({ action, source, label, url, ttl_minutes, tags }) {
+  if (action === 'list') {
+    const tasks = listPrefetchTasks()
+    if (tasks.length === 0) return '当前没有预热任务。'
+    return tasks.map(t =>
+      `[${t.enabled ? '✓' : '✗'}] ${t.source}  ${t.label}  TTL=${t.ttl_minutes}min\n  URL: ${t.url}`
+    ).join('\n')
+  }
+
+  if (action === 'add') {
+    if (!source) return '错误：缺少 source'
+    if (!label) return '错误：缺少 label'
+    if (!url) return '错误：缺少 url'
+    upsertPrefetchTask({ source, label, url, ttlMinutes: ttl_minutes ?? 60, tags: tags ?? [] })
+    return `预热任务已保存：${source}（${label}），TTL=${ttl_minutes ?? 60}min。下次运行预热时生效。`
+  }
+
+  if (action === 'remove') {
+    if (!source) return '错误：缺少 source'
+    const ok = removePrefetchTask(source)
+    return ok ? `预热任务已删除：${source}` : `未找到任务：${source}`
+  }
+
+  return `错误：未知 action "${action}"，可选 add / remove / list`
 }
 
 // set_tick_interval：L2 调节自身思维节奏

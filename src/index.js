@@ -2,7 +2,7 @@ import { config } from './config.js'
 import { callLLM } from './llm.js'
 import { buildSystemPrompt } from './prompt.js'
 import { runRecognizer } from './memory/recognizer.js'
-import { runInjector, formatMemoriesForPrompt, formatTaskKnowledge } from './memory/injector.js'
+import { runInjector, formatMemoriesForPrompt, formatTaskKnowledge, formatPrefetchedItems } from './memory/injector.js'
 import { gatherContext, formatExtraContext } from './context/gatherer.js'
 import { getDB, getConfig, setConfig, getKnownEntities, getOrInitBirthTime, insertConversation, insertMemory, getRecentConversationPartners, getDueReminders, markReminderFired, getNextPendingReminder, getMemoryCount } from './db.js'
 import { popMessage, hasMessages, hasUserMessages, getQueueSnapshot, setInterruptCallback, requeueMessage, pushMessage } from './queue.js'
@@ -248,6 +248,8 @@ async function process(input, label, msg = null) {
     const taskKnowledgeText = formatTaskKnowledge(injection.taskKnowledge)
 
     // 用户实时消息走快速路径：跳过重型上下文采集，避免被任务背景拖慢。
+    const prefetchText = formatPrefetchedItems(injection.prefetchedItems)
+
     let extraContextText = ''
     if (state.task && !fastUserPath) {
       const extraContext = await gatherContext({
@@ -327,7 +329,7 @@ async function process(input, label, msg = null) {
       hasActiveTask,
       task: state.task || null,
       taskKnowledge: taskKnowledgeText,
-      extraContext: extraContextText,
+      extraContext: [prefetchText, extraContextText].filter(Boolean).join('\n\n'),
       lastToolResult: injection.lastToolResult || null,
       existenceDesc: describeExistence(birthTime),
     })

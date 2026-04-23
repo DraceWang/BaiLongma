@@ -7,6 +7,7 @@ import {
   getRecentConversation,
   getRecentConversationTimeline,
   getRecentActionLogs,
+  getValidPrefetchCache,
 } from '../db.js'
 
 // 消息格式解析
@@ -179,12 +180,13 @@ export async function runInjector({ message, state, hint = '' }) {
   const baseTools = [
     'send_message', 'fetch_url', 'list_dir', 'read_file', 'write_file',
     'delete_file', 'make_dir', 'exec_command', 'kill_process', 'list_processes',
-    'set_tick_interval', 'schedule_reminder',
+    'set_tick_interval', 'schedule_reminder', 'manage_prefetch_task',
   ]
   if (senderId || state?.prev_recall) baseTools.push('search_memory')
   const tools = [...new Set(baseTools)]
 
   const actionLog = getRecentActionLogs(10)
+  const prefetchedItems = getValidPrefetchCache()
 
   return {
     memories,
@@ -198,6 +200,7 @@ export async function runInjector({ message, state, hint = '' }) {
     tools,
     lastToolResult,
     actionLog,
+    prefetchedItems,
   }
 }
 
@@ -222,6 +225,16 @@ export function formatMemoriesForPrompt(memories, recallMemories = []) {
   }
 
   return parts.join('\n\n')
+}
+
+// 预热缓存：格式化注入文本
+export function formatPrefetchedItems(prefetchedItems = []) {
+  if (!prefetchedItems?.length) return ''
+  const body = prefetchedItems.map(item => {
+    const fetchedTime = item.fetched_at?.slice(11, 16) || ''
+    return `【${item.source}】（${fetchedTime} 已查好）\n${item.content}`
+  }).join('\n\n')
+  return body + '\n\n以上数据已预查好，数据别出错，语言自己组织，不要每次都一个句式。'
 }
 
 // 任务知识库：显示完整 content + detail

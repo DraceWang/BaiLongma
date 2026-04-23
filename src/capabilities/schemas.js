@@ -272,6 +272,46 @@ export const TOOL_SCHEMAS = {
     }
   },
 
+  manage_prefetch_task: {
+    type: 'function',
+    function: {
+      name: 'manage_prefetch_task',
+      description: '管理预热任务——系统会在每次启动前自动 fetch 这些 URL 并注入到上下文里，无需再调 fetch_url。适合定期要查的内容（天气、新闻、价格等）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['add', 'remove', 'list'],
+            description: 'add=添加或更新任务，remove=删除任务，list=查看所有任务',
+          },
+          source: {
+            type: 'string',
+            description: '任务唯一标识，建议格式如 "weather:Beijing"、"news:36kr"。add/remove 时必填。',
+          },
+          label: {
+            type: 'string',
+            description: '任务显示名称，如"北京天气"。add 时必填。',
+          },
+          url: {
+            type: 'string',
+            description: '要预热的 URL。add 时必填。',
+          },
+          ttl_minutes: {
+            type: 'number',
+            description: '缓存有效期（分钟），默认 60。天气建议 60，新闻建议 30，日历建议 720。',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '标签，如 ["weather", "Beijing"]，方便检索。',
+          },
+        },
+        required: ['action'],
+      },
+    },
+  },
+
   generate_music: {
     type: 'function',
     function: {
