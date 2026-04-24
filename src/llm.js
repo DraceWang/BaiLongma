@@ -241,7 +241,9 @@ const PARAM_ALIASES = {
   make_dir: { directory: 'path', dir: 'path', folder: 'path' },
   delete_file: { file: 'path', filename: 'path' },
   exec_command: { cmd: 'command', shell: 'command', bg: 'background' },
+  web_search: { q: 'query', keyword: 'query', keywords: 'query', search: 'query' },
   fetch_url: { link: 'url', href: 'url', uri: 'url' },
+  browser_read: { link: 'url', href: 'url', uri: 'url' },
   search_memory: { q: 'keyword', query: 'keyword', term: 'keyword' },
 }
 
@@ -293,8 +295,12 @@ function summarizeToolCall(name, args = {}) {
       return `read_file(${args.path || args.filename || args.file_path || '?'})`
     case 'list_dir':
       return `list_dir(${args.path || args.dir || args.directory || '.'})`
+    case 'web_search':
+      return `web_search(${String(args.query || args.q || args.keyword || '?').slice(0, 80)})`
     case 'fetch_url':
       return `fetch_url(${String(args.url || args.link || args.href || '?').slice(0, 80)})`
+    case 'browser_read':
+      return `browser_read(${String(args.url || args.link || args.href || '?').slice(0, 80)})`
     case 'search_memory':
       return `search_memory(${String(args.keyword || args.query || args.q || '?').slice(0, 60)})`
     case 'write_file':
@@ -332,13 +338,15 @@ function throwIfAborted(signal) {
 
 // 主调用：agentic 循环，连续执行工具直到模型停止
 // 返回 { content: string, toolResult: { name, args, result } | null, aborted: bool }
-export async function callLLM({ systemPrompt, message, temperature = 0.5, topP = 0.9, tools = [], maxTokens, thinking = true, signal, onToolCall, onStream, onRetry, toolContext = {} }) {
+export async function callLLM({ systemPrompt, message, messages: inputMessages = null, temperature = 0.5, topP = 0.9, tools = [], maxTokens, thinking = true, signal, onToolCall, onStream, onRetry, toolContext = {}, mustReply = false }) {
   const toolSchemas = getToolSchemas(tools)
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: message }
-  ]
+  const messages = Array.isArray(inputMessages) && inputMessages.length > 0
+    ? inputMessages.map(item => ({ ...item }))
+    : [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message }
+      ]
 
   if (shouldThrottle()) {
     console.log('[配额] 用量超过 95%，跳过本次调用')
@@ -347,6 +355,9 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
 
   let allContent = ''
   let lastToolResult = null
+  let sawToolCall = false
+  let sentMessage = false
+  let finalNudgeUsed = false
   const MAX_TOOL_ROUNDS = 10
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -383,8 +394,19 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
       }
     }
 
-    // 无工具调用：本轮结束
-    if (effectiveToolCalls.length === 0) break
+    // 无工具调用：本轮结束；若工具后空回复，再补一轮明确的最终回复指令。
+    if (effectiveToolCalls.length === 0) {
+      if (mustReply && sawToolCall && !sentMessage && !allContent.trim() && !finalNudgeUsed) {
+        messages.push({
+          role: 'user',
+          content: '工具结果已经返回，但你还没有给用户最终回复。请现在基于已有工具结果调用 send_message 回复用户；如果信息不足，也要说明查到的结果、失败来源和限制，不要直接结束。',
+        })
+        finalNudgeUsed = true
+        continue
+      }
+      break
+    }
+    sawToolCall = true
 
     // 为没有 id 的工具调用分配 id（保证 assistant 消息与 tool 消息 id 一致）
     effectiveToolCalls.forEach((tc, i) => { if (!tc.id) tc.id = `tool_${round}_${i}` })
@@ -402,6 +424,7 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
       const normalizedArgs = normalizeArgs(tc.name, args)
       const result = await executeTool(tc.name, normalizedArgs, { ...toolContext, signal })
       throwIfAborted(signal)
+      if (tc.name === 'send_message') sentMessage = true
       if (shouldPersistActionLog(tc.name)) {
         insertActionLog({
           timestamp: new Date().toISOString(),
@@ -411,7 +434,7 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
         })
       }
       console.log(`[工具结果] ${tc.name}: ${result.slice(0, 100)}`)
-      if (onToolCall) onToolCall(tc.name, args, result)
+      if (onToolCall) onToolCall(tc.name, normalizedArgs, result)
       lastToolResult = { name: tc.name, args: normalizedArgs, result }
       toolResults.push({ id: tc.id, name: tc.name, result })
     }
@@ -426,7 +449,13 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
       const resultSummary = toolResults.map(tr =>
         `[工具结果] ${tr.name}: ${tr.result.slice(0, 300)}`
       ).join('\n')
-      messages.push({ role: 'user', content: `工具执行结果：\n${resultSummary}\n\n请继续完成任务。` })
+      const hasSendMessage = toolResults.some(tr => tr.name === 'send_message')
+      messages.push({
+        role: 'user',
+        content: hasSendMessage
+          ? `工具执行结果：\n${resultSummary}\n\n消息已经发送。请不要重复发送；如无后续必要，直接结束本轮。`
+          : `工具执行结果：\n${resultSummary}\n\n请继续完成任务。如果这是用户消息，请在信息足够时调用 send_message 给用户最终答复；如果工具失败，也要说明失败和可用线索，不要空结束。`,
+      })
     } else {
       const assistantMsg = {
         role: 'assistant',
@@ -446,6 +475,13 @@ export async function callLLM({ systemPrompt, message, temperature = 0.5, topP =
           role: 'tool',
           tool_call_id: tr.id,
           content: String(tr.result)
+        })
+      }
+      const hasSendMessage = toolResults.some(tr => tr.name === 'send_message')
+      if (mustReply && !hasSendMessage) {
+        messages.push({
+          role: 'user',
+          content: '工具结果已经返回。请基于已有结果继续完成用户请求；如果信息已经足够，必须调用 send_message 给用户最终回复。如果工具失败或资料不足，也要说明限制和下一步建议，不要直接结束。',
         })
       }
     }

@@ -128,6 +128,86 @@ function buildToolContextForProcess(msg, injection) {
   })
 }
 
+function formatConversationMessage(row, currentMsg = null) {
+  const timestamp = row.timestamp ? ` ${row.timestamp}` : ''
+  if (row.role === 'jarvis') {
+    const target = row.to_id ? ` to ${row.to_id}` : ''
+    return {
+      role: 'assistant',
+      content: `[assistant${target}${timestamp}]\n${row.content || ''}`.trim(),
+    }
+  }
+
+  const isCurrent = currentMsg
+    && row.role === 'user'
+    && row.from_id === currentMsg.fromId
+    && row.timestamp === currentMsg.timestamp
+    && row.content === currentMsg.content
+  const marker = isCurrent ? 'current user message' : 'user message'
+  return {
+    role: 'user',
+    content: `[${marker} from ${row.from_id || 'unknown'}${timestamp}]\n${row.content || ''}`.trim(),
+  }
+}
+
+function buildRuntimeContextMessages({ recentActions = [], actionLog = [], lastToolResult = null } = {}) {
+  const parts = []
+
+  if (recentActions?.length > 0) {
+    const lines = recentActions.map(item => `- ${item.ts?.slice(11, 16) || ''} ${item.summary || ''}`).join('\n')
+    parts.push(`Recent assistant actions:\n${lines}\nAvoid immediately repeating the same action unless the current user message asks for it.`)
+  }
+
+  if (actionLog?.length > 0) {
+    const lines = actionLog.slice(-10).map(item => {
+      const time = item.timestamp?.slice(11, 16) || ''
+      const detail = item.detail ? `\n  ${item.detail}` : ''
+      return `- ${time} ${item.tool || ''} · ${item.summary || ''}${detail}`
+    }).join('\n')
+    parts.push(`Recent tool/action log:\n${lines}\nUse this as runtime context only. Do not repeat completed actions unless the current task requires it.`)
+  }
+
+  if (lastToolResult) {
+    const argsSummary = Object.entries(lastToolResult.args || {})
+      .map(([key, value]) => `${key}=${String(value).slice(0, 60)}`)
+      .join(', ')
+    const resultPreview = String(lastToolResult.result || '').slice(0, 500)
+    parts.push(`Previous tool result:\n${lastToolResult.name}(${argsSummary}) ->\n${resultPreview}\nAbsorb this result before deciding the next step.`)
+  }
+
+  if (parts.length === 0) return []
+  return [{
+    role: 'user',
+    content: `[runtime context]\n${parts.join('\n\n')}`,
+  }]
+}
+
+function buildLLMMessages({ systemPrompt, conversationWindow = [], input, msg = null, recentActions = [], actionLog = [], lastToolResult = null }) {
+  const messages = [{ role: 'system', content: systemPrompt }]
+  messages.push(...buildRuntimeContextMessages({ recentActions, actionLog, lastToolResult }))
+
+  const rows = Array.isArray(conversationWindow) ? conversationWindow : []
+  for (const row of rows) {
+    if (row?.content) messages.push(formatConversationMessage(row, msg))
+  }
+
+  const hasCurrentMessage = !!msg && rows.some(row =>
+    row.role === 'user'
+    && row.from_id === msg.fromId
+    && row.timestamp === msg.timestamp
+    && row.content === msg.content
+  )
+
+  if (!hasCurrentMessage) {
+    messages.push({
+      role: 'user',
+      content: input,
+    })
+  }
+
+  return messages
+}
+
 const MAX_MESSAGE_RETRIES = 3
 
 function createAbortError(reason = 'Aborted') {
@@ -320,18 +400,24 @@ async function process(input, label, msg = null) {
       memories: memoriesText,
       directions: directionsText,
       constraints: injection.constraints || [],
-      conversationWindow: injection.conversationWindow || [],
       personMemory: injection.personMemory || null,
       thoughtStack: state.thoughtStack,
       entities,
-      recentActions: state.recentActions,
-      actionLog: injection.actionLog || [],
       hasActiveTask,
       task: state.task || null,
       taskKnowledge: taskKnowledgeText,
       extraContext: [prefetchText, extraContextText].filter(Boolean).join('\n\n'),
-      lastToolResult: injection.lastToolResult || null,
       existenceDesc: describeExistence(birthTime),
+    })
+
+    const llmMessages = buildLLMMessages({
+      systemPrompt,
+      conversationWindow: injection.conversationWindow || [],
+      input,
+      msg,
+      recentActions: state.recentActions,
+      actionLog: injection.actionLog || [],
+      lastToolResult: injection.lastToolResult || null,
     })
 
     // 发出完整系统提示词事件
@@ -342,13 +428,23 @@ async function process(input, label, msg = null) {
     llmResult = await callLLM({
       systemPrompt,
       message: input,
+      messages: llmMessages,
       tools: injection.tools || ['send_message'],
       maxTokens: undefined,
       signal: controller.signal,
       toolContext,
+      mustReply: !!msg?.fromId,
       onToolCall: (name, args, result) => {
-        emitEvent('tool_call', { name, args, result: String(result).slice(0, 1000) })
-        toolCallLog.push({ name, args, result: String(result).slice(0, 500) })
+        const resultText = String(result)
+        let ok = true
+        try {
+          const parsed = JSON.parse(resultText)
+          if (parsed && parsed.ok === false) ok = false
+        } catch {
+          ok = !/^(错误|请求失败|执行失败|命令超时|命令执行失败)/.test(resultText.trim())
+        }
+        emitEvent('tool_call', { name, args, result: resultText.slice(0, 1000), ok })
+        toolCallLog.push({ name, args, result: resultText.slice(0, 500), ok })
         // 记录 Jarvis 发出的消息
         if (name === 'send_message' && args?.target_id && args?.content) {
           const cleanedContent = trimAssistantFluff(args.content)
@@ -398,15 +494,55 @@ async function process(input, label, msg = null) {
   console.log('\nJarvis:', response)
   emitEvent('response', { sessionRef, label, content: response })
 
-  // 收紧约束：回复他者时只有真实 send_message 工具调用才算已发出消息，不再做文本标签救援。
+  // 用户消息不能静默失败：如果模型生成了正文但忘记调用 send_message，
+  // 由运行时兜底投递给当前用户；TICK/主动消息仍必须走显式工具调用。
   if (msg && msg.fromId && !toolCallLog.some(t => t.name === 'send_message')) {
-    console.warn(`[协议违规] 模型未调用 send_message，回复不会发出。from=${msg.fromId}`)
-    emitEvent('protocol_violation', {
-      label,
-      reason: 'missing_send_message',
-      fromId: msg.fromId,
-      content: response.slice(0, 500),
-    })
+    const fallbackContent = trimAssistantFluff(
+      response
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/\[RECALL:\s*.+?\]/g, '')
+        .replace(/\[SET_TASK:\s*[\s\S]+?\]/g, '')
+        .replace(/\[CLEAR_TASK\]/g, '')
+        .replace(/\[UPDATE_PERSONA:\s*[\s\S]+?\]/g, '')
+        .trim()
+    )
+
+    if (fallbackContent) {
+      const timestamp = nowTimestamp()
+      console.warn(`[协议兜底] 模型未调用 send_message，已将正文发给 ${msg.fromId}`)
+      emitEvent('message', {
+        from: 'consciousness',
+        to: msg.fromId,
+        content: fallbackContent,
+        timestamp,
+      })
+      insertConversation({
+        role: 'jarvis',
+        from_id: 'jarvis',
+        to_id: msg.fromId,
+        content: fallbackContent,
+        timestamp,
+      })
+      toolCallLog.push({
+        name: 'send_message',
+        args: { target_id: msg.fromId, content: fallbackContent },
+        result: 'fallback delivered from plain response',
+      })
+      emitEvent('protocol_violation', {
+        label,
+        reason: 'missing_send_message_fallback_delivered',
+        fromId: msg.fromId,
+        content: fallbackContent.slice(0, 500),
+      })
+    } else {
+      console.warn(`[协议违规] 模型未调用 send_message，且没有可兜底发送的正文。from=${msg.fromId}`)
+      emitEvent('protocol_violation', {
+        label,
+        reason: 'missing_send_message',
+        fromId: msg.fromId,
+        content: response.slice(0, 500),
+      })
+    }
   }
 
   // 4. 检测 [RECALL: ...]

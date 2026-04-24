@@ -1036,7 +1036,9 @@ const TOOL_ZH = {
   exec_command: "执行命令",
   kill_process: "终止进程",
   list_processes: "列出进程",
+  web_search: "搜索网页",
   fetch_url: "抓取网页",
+  browser_read: "浏览器读取网页",
   search_memory: "检索记忆",
   set_tick_interval: "调整节奏",
   speak: "朗读",
@@ -1056,7 +1058,9 @@ const TOOL_ICON = {
   exec_command: "⚡",
   kill_process: "🛑",
   list_processes: "📋",
+  web_search: "🔎",
   fetch_url: "🌐",
+  browser_read: "🧭",
   search_memory: "🔍",
   set_tick_interval: "⏱️",
   speak: "🔊",
@@ -1231,6 +1235,83 @@ class ThoughtStream {
     this.clearStatus();
   }
 
+  parseJsonResult(result) {
+    try {
+      const parsed = JSON.parse(String(result || ""));
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  hostFromUrl(url) {
+    try {
+      return new URL(String(url || "")).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  }
+
+  compactText(text, max = 180) {
+    const compact = String(text || "").replace(/\s+/g, " ").trim();
+    return compact.length > max ? compact.slice(0, max) + "…" : compact;
+  }
+
+  formatWebSearchDetail(payload) {
+    const results = Array.isArray(payload.results) ? payload.results : [];
+    if (payload.ok === false) {
+      return `搜索失败：${payload.error || "没有拿到结果"}。关键词：${payload.query || "未提供"}`;
+    }
+
+    const lines = [`关键词：${payload.query || "未提供"}；找到 ${results.length} 条结果。`];
+    results.slice(0, 3).forEach((item, index) => {
+      const host = this.hostFromUrl(item.url);
+      const title = this.compactText(item.title || item.url || "未命名结果", 70);
+      const snippet = this.compactText(item.snippet || "", 90);
+      lines.push(`${index + 1}. ${title}${host ? `（${host}）` : ""}${snippet ? `：${snippet}` : ""}`);
+    });
+    return lines.join(" ");
+  }
+
+  formatFetchUrlDetail(payload) {
+    const host = this.hostFromUrl(payload.url);
+    if (payload.ok === false) {
+      const status = payload.status ? `HTTP ${payload.status}` : (payload.error || "请求失败");
+      if (payload.error === "no readable content extracted") {
+        return `未读到正文：页面能打开${host ? `（${host}）` : ""}，但只拿到空白、等待页或反爬验证内容。建议换一个可直接访问的来源。`;
+      }
+      return `读取失败：${status}${host ? `；来源：${host}` : ""}。${payload.hint ? this.compactText(payload.hint, 90) : "可以换一个可访问来源。"}`;
+    }
+
+    const title = this.compactText(payload.title || host || payload.url || "网页", 80);
+    const content = this.compactText(payload.content || "", 220);
+    return `已读取：${title}${host ? `（${host}）` : ""}。${content || "页面能打开，但没有提取到可用正文。"}`;
+  }
+
+  formatBrowserReadDetail(payload) {
+    const host = this.hostFromUrl(payload.final_url || payload.url);
+    if (payload.ok === false) {
+      if (payload.error === "no readable content rendered") {
+        return `浏览器已打开页面${host ? `（${host}）` : ""}，但仍未读到正文；可能需要登录、验证码或阻止自动化访问。建议换来源。`;
+      }
+      return `浏览器读取失败${host ? `（${host}）` : ""}：${this.compactText(payload.error || "页面无法渲染", 120)}`;
+    }
+
+    const title = this.compactText(payload.title || host || payload.final_url || payload.url || "网页", 80);
+    const content = this.compactText(payload.content || "", 240);
+    return `浏览器已读取：${title}${host ? `（${host}）` : ""}。${content || "页面已渲染，但没有提取到可用正文。"}`;
+  }
+
+  formatToolDetail(name, result) {
+    const parsed = this.parseJsonResult(result);
+    if (parsed?.tool === "web_search" || name === "web_search") return this.formatWebSearchDetail(parsed || {});
+    if (parsed?.tool === "fetch_url" || name === "fetch_url") return this.formatFetchUrlDetail(parsed || {});
+    if (parsed?.tool === "browser_read" || name === "browser_read") return this.formatBrowserReadDetail(parsed || {});
+
+    const trimmed = String(result ?? "").trim();
+    return this.compactText(trimmed.replace(/\s+/g, " "), this.toolDetailLength);
+  }
+
   finalizeLastTool() {
     if (this.lastToolEl) {
       this.lastToolEl.classList.add("done");
@@ -1239,14 +1320,14 @@ class ThoughtStream {
   }
 
   // 显示中文工具名 + 图标 + 成功/失败状态 + 结果摘要
-  tool(name, args, result) {
+  tool(name, args, result, ok = undefined) {
     if (!this.curLine) this.newLine("工具调用");
     this.finalizeLastTool();
 
     const zh = TOOL_ZH[name] || name;
     const icon = TOOL_ICON[name] || "🔧";
     const resultStr = result == null ? "" : String(result);
-    const failure = isFailureResult(resultStr);
+    const failure = ok === false || (ok !== true && isFailureResult(resultStr));
     this.hadToolCall = true;
     this.toolFailed = this.toolFailed || failure;
     const statusCls = failure ? "failed" : "success";
@@ -1271,14 +1352,11 @@ class ThoughtStream {
     toolEl.appendChild(statusSpan);
     this.curLine.appendChild(toolEl);
 
-    const trimmed = resultStr.trim();
-    if (trimmed) {
+    const detailText = this.formatToolDetail(name, resultStr);
+    if (detailText) {
       const detail = document.createElement("div");
       detail.className = "line-tool-detail";
-      const snippet = trimmed.replace(/\s+/g, " ");
-      detail.textContent = snippet.length > this.toolDetailLength
-        ? snippet.slice(0, this.toolDetailLength) + "…"
-        : snippet;
+      detail.textContent = detailText;
       this.curLine.appendChild(detail);
     }
 
@@ -1417,7 +1495,7 @@ function handle({ type, data = {} }) {
       currentStream().stopThinking();
       break;
     case "tool_call":
-      currentStream().tool(data.name, data.args, data.result);
+      currentStream().tool(data.name, data.args, data.result, data.ok);
       break;
     case "response":
       // 一轮完成：停所有动画
@@ -1530,20 +1608,37 @@ function ensureAudioContext() {
   if (!audioCtx) {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return null;
-    audioCtx = new AudioCtx();
+    try { audioCtx = new AudioCtx(); } catch { return null; }
   }
   return audioCtx;
+}
+
+function unlockAudioOnFirstGesture() {
+  const unlock = () => {
+    const ctx = ensureAudioContext();
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+    window.removeEventListener("pointerdown", unlock, true);
+    window.removeEventListener("keydown", unlock, true);
+    window.removeEventListener("touchstart", unlock, true);
+  };
+  window.addEventListener("pointerdown", unlock, true);
+  window.addEventListener("keydown", unlock, true);
+  window.addEventListener("touchstart", unlock, true);
 }
 
 async function playJarvisAlert() {
   const ctx = ensureAudioContext();
   if (!ctx) return;
   try { if (ctx.state === "suspended") await ctx.resume(); } catch { return; }
+  if (ctx.state !== "running") return;
   const now = ctx.currentTime;
   const master = ctx.createGain();
   master.gain.setValueAtTime(0.0001, now);
-  master.gain.exponentialRampToValueAtTime(0.055, now + 0.02);
-  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+  master.gain.exponentialRampToValueAtTime(0.3, now + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.18, now + 0.28);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
   master.connect(ctx.destination);
 
   const oscA = ctx.createOscillator();
@@ -1558,12 +1653,12 @@ async function playJarvisAlert() {
   oscB.frequency.exponentialRampToValueAtTime(1320, now + 0.34);
   oscB.connect(master);
 
-  oscA.start(now); oscA.stop(now + 0.22);
-  oscB.start(now + 0.12); oscB.stop(now + 0.36);
+  oscA.start(now); oscA.stop(now + 0.32);
+  oscB.start(now + 0.12); oscB.stop(now + 0.5);
 
   oscA.addEventListener("ended", () => oscA.disconnect(), { once: true });
   oscB.addEventListener("ended", () => oscB.disconnect(), { once: true });
-  setTimeout(() => master.disconnect(), 500);
+  setTimeout(() => master.disconnect(), 700);
 }
 
 function isTyping() {
@@ -1640,7 +1735,7 @@ function safeHref(rawUrl) {
 function renderInlineMarkdown(text) {
   const codeTokens = [];
   let html = String(text ?? "").replace(/`([^`]+)`/g, (_, code) => {
-    const token = `@@CODE_${codeTokens.length}@@`;
+    const token = `%%CODETOKEN${codeTokens.length}%%`;
     codeTokens.push(`<code>${escapeHtml(code)}</code>`);
     return token;
   });
@@ -1655,7 +1750,7 @@ function renderInlineMarkdown(text) {
   html = html.replace(/(\*|_)(.+?)\1/g, "<em>$2</em>");
 
   codeTokens.forEach((token, index) => {
-    html = html.replace(`@@CODE_${index}@@`, token);
+    html = html.replaceAll(`%%CODETOKEN${index}%%`, token);
   });
 
   return html;
@@ -1901,6 +1996,7 @@ connectSSE();
 loadAgentProfile();
 restoreChatHistory();
 initUpdaterUi();
+unlockAudioOnFirstGesture();
 
 window.addEventListener("beforeunload", () => {
   if (typeof removeUpdaterStatusListener === "function") {

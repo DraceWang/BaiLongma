@@ -178,7 +178,7 @@ export async function runInjector({ message, state, hint = '' }) {
   const memories = deduplicateMemories([relevantMemories, senderMemories]).slice(0, mergeCap)
 
   const baseTools = [
-    'send_message', 'fetch_url', 'list_dir', 'read_file', 'write_file',
+    'send_message', 'web_search', 'fetch_url', 'browser_read', 'list_dir', 'read_file', 'write_file',
     'delete_file', 'make_dir', 'exec_command', 'kill_process', 'list_processes',
     'set_tick_interval', 'schedule_reminder', 'manage_prefetch_task',
   ]

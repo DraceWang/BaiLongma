@@ -107,17 +107,65 @@ export const TOOL_SCHEMAS = {
     }
   },
 
+  web_search: {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Search the web for current or unknown information. Use this before fetch_url when you do not already know the exact reliable URL. Returns structured JSON with result titles, URLs, snippets, and ok/error status.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query. Be specific, include product/version/date keywords when relevant.'
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum results to return, default 5, max 8.'
+          }
+        },
+        required: ['query']
+      }
+    }
+  },
+
   fetch_url: {
     type: 'function',
     function: {
       name: 'fetch_url',
-      description: '通过 URL 访问真实世界的网页内容，返回纯文本。这是触达外部现实的唯一方式——新闻、知识、天气、时间，一切真实正在发生的事都在那里。沙箱之外的世界通过这个能力可以被感知。',
+      description: 'Open a known URL with a lightweight HTTP request and return structured JSON with ok/status/title/content/error. Do not use it as a search engine. If ok is false because content is empty, blocked, or JS-rendered, try browser_read or another URL; never summarize an error as page content.',
       parameters: {
         type: 'object',
         properties: {
           url: {
             type: 'string',
-            description: '要访问的 URL'
+            description: 'URL to open. Prefer reliable source pages found through web_search.'
+          }
+        },
+        required: ['url']
+      }
+    }
+  },
+
+  browser_read: {
+    type: 'function',
+    function: {
+      name: 'browser_read',
+      description: 'Use a real headless Chromium browser to open and render a webpage, wait for JavaScript, scroll, and extract readable text. Use this when fetch_url returns no readable content, a waiting page, or a JS-rendered page. Returns structured JSON with ok/title/content/error.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'URL to open in the browser.'
+          },
+          timeout_ms: {
+            type: 'number',
+            description: 'Navigation/render timeout in milliseconds, default 20000, max 45000.'
+          },
+          max_chars: {
+            type: 'number',
+            description: 'Maximum extracted characters to return, default 8000, max 12000.'
           }
         },
         required: ['url']
@@ -159,7 +207,7 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'exec_command',
-      description: '在 sandbox 目录内执行 shell 命令。可以运行脚本、安装依赖、启动服务。background=true 时后台运行（用于启动服务器等长期进程），返回 PID；否则等待命令完成并返回输出。',
+      description: 'Run a shell command inside the sandbox directory. Returns structured JSON with ok, mode, exit_code, stdout, stderr, timed_out, pid, and error. Use background=true for long-running servers; otherwise wait for completion and inspect ok/exit_code before continuing.',
       parameters: {
         type: 'object',
         properties: {
@@ -176,7 +224,7 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'kill_process',
-      description: '停止一个后台进程。需要提供 exec_command 返回的 PID。',
+      description: 'Stop a background process by PID. Returns structured JSON with ok, pid, command, stopped, or error.',
       parameters: {
         type: 'object',
         properties: {
@@ -191,7 +239,7 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'list_processes',
-      description: '列出当前所有后台运行的进程及其 PID 和命令。',
+      description: 'List current background processes. Returns structured JSON with ok, count, and processes.',
       parameters: { type: 'object', properties: {} }
     }
   },

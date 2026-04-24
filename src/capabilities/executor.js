@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { spawn } from 'child_process'
+import { chromium } from 'playwright'
 import { nowTimestamp } from '../time.js'
 import { searchMemories, insertMemory, normalizeConversationPartyId, createReminder, upsertPrefetchTask, removePrefetchTask, listPrefetchTasks } from '../db.js'
 import { emitEvent } from '../events.js'
@@ -15,6 +16,7 @@ const bgProcesses = new Map()
 // URL 访问缓存：url → { content, fetchedAt (ms timestamp) }
 // 避免同一 URL 在短时间内被反复请求（如天气每天只需查一次）
 const urlCache = new Map()
+const searchCache = new Map()
 
 const URL_TTL_MS = {
   default: 60 * 60 * 1000,       // 默认：1 小时
@@ -115,8 +117,12 @@ export async function executeTool(name, args, context = {}) {
         return await execKillProcess(args)
       case 'list_processes':
         return await execListProcesses()
+      case 'web_search':
+        return await execWebSearch(args, context)
       case 'fetch_url':
         return await execFetchUrl(args, context)
+      case 'browser_read':
+        return await execBrowserRead(args, context)
       case 'search_memory':
         return await execSearchMemory(args)
       case 'speak':
@@ -370,13 +376,13 @@ async function execMakeDir(args, context = {}) {
 // background=true 时后台运行，返回 PID；否则等待完成，返回输出
 async function execCommand(args, context = {}) {
   throwIfAborted(context.signal)
-  const command = args.command || args.cmd
-  if (!command) return '错误：未提供命令'
+  const command = String(args.command || args.cmd || '').trim()
+  if (!command) return toolJson({ ok: false, tool: 'exec_command', error: 'missing command' })
 
   const background = args.background === true || args.background === 'true'
   // schema 说明单位是秒，转换为毫秒；兼容旧调用（如果传入 >1000 视为已是毫秒）
   const rawTimeout = Number(args.timeout) || 30
-  const timeoutMs = Math.min(rawTimeout < 1000 ? rawTimeout * 1000 : rawTimeout, 120000)
+  const timeoutMs = Math.max(1000, Math.min(rawTimeout < 1000 ? rawTimeout * 1000 : rawTimeout, 120000))
 
   console.log(`[exec_command] ${background ? '[后台]' : '[前台]'} ${command}`)
   emitEvent('exec_command', { command, background })
@@ -388,6 +394,15 @@ async function execCommand(args, context = {}) {
   }
 }
 
+function toolJson(payload) {
+  return JSON.stringify(payload, null, 2)
+}
+
+function trimCommandOutput(value = '', max = 6000) {
+  const text = String(value || '')
+  return text.length > max ? `${text.slice(0, max)}\n\n...` : text
+}
+
 function execBackground(command) {
   const child = spawn(command, {
     shell: true,
@@ -397,6 +412,16 @@ function execBackground(command) {
   })
 
   const pid = child.pid
+  if (!pid) {
+    return toolJson({
+      ok: false,
+      tool: 'exec_command',
+      mode: 'background',
+      command,
+      cwd: SANDBOX_ROOT,
+      error: 'process did not start',
+    })
+  }
   const startedAt = nowTimestamp()
   bgProcesses.set(pid, { process: child, command, startedAt })
 
@@ -416,7 +441,16 @@ function execBackground(command) {
     emitEvent('process_output', { pid, stream: 'stderr', text })
   })
 
-  return `后台进程已启动，PID=${pid}，命令：${command}\n可用 kill_process 工具停止它。`
+  return toolJson({
+    ok: true,
+    tool: 'exec_command',
+    mode: 'background',
+    command,
+    cwd: SANDBOX_ROOT,
+    pid,
+    started_at: startedAt,
+    hint: 'Process is running in the background. Use list_processes to inspect it or kill_process with this pid to stop it.',
+  })
 }
 
 function execForeground(command, timeoutMs, signal) {
@@ -444,11 +478,31 @@ function execForeground(command, timeoutMs, signal) {
     const merged = createMergedAbortSignal(signal)
     const onAbort = () => {
       child.kill()
-      finish(`命令已中止：${command}`)
+      finish(toolJson({
+        ok: false,
+        tool: 'exec_command',
+        mode: 'foreground',
+        command,
+        cwd: SANDBOX_ROOT,
+        aborted: true,
+        stdout: trimCommandOutput(stdout),
+        stderr: trimCommandOutput(stderr),
+        error: 'command aborted',
+      }))
     }
     if (merged?.signal.aborted) {
       child.kill()
-      finish(`命令已中止：${command}`)
+      finish(toolJson({
+        ok: false,
+        tool: 'exec_command',
+        mode: 'foreground',
+        command,
+        cwd: SANDBOX_ROOT,
+        aborted: true,
+        stdout: '',
+        stderr: '',
+        error: 'command aborted before start',
+      }))
       return
     }
     merged?.signal.addEventListener('abort', onAbort, { once: true })
@@ -456,7 +510,19 @@ function execForeground(command, timeoutMs, signal) {
     timer = setTimeout(() => {
       timedOut = true
       child.kill()
-      finish(`命令超时（${timeoutMs / 1000}s），已强制终止。已收集输出：\n${(stdout + stderr).slice(0, 1000)}`)
+      finish(toolJson({
+        ok: false,
+        tool: 'exec_command',
+        mode: 'foreground',
+        command,
+        cwd: SANDBOX_ROOT,
+        timed_out: true,
+        timeout_ms: timeoutMs,
+        stdout: trimCommandOutput(stdout),
+        stderr: trimCommandOutput(stderr),
+        error: `command timed out after ${timeoutMs / 1000}s`,
+        hint: 'If this is a long-running server, rerun with background=true.',
+      }))
     }, timeoutMs)
 
     child.stdout?.on('data', (d) => { stdout += d.toString() })
@@ -464,13 +530,32 @@ function execForeground(command, timeoutMs, signal) {
 
     child.on('close', (code) => {
       if (timedOut) return
-      const combined = (stdout + (stderr ? '\n[stderr]\n' + stderr : '')).slice(0, 3000)
-      finish(`命令完成（exit code=${code}）\n${combined || '（无输出）'}`)
+      finish(toolJson({
+        ok: code === 0,
+        tool: 'exec_command',
+        mode: 'foreground',
+        command,
+        cwd: SANDBOX_ROOT,
+        exit_code: code,
+        stdout: trimCommandOutput(stdout),
+        stderr: trimCommandOutput(stderr),
+        error: code === 0 ? null : `command exited with code ${code}`,
+        hint: code === 0 ? 'Command completed successfully.' : 'Inspect stderr/stdout before retrying or changing the command.',
+      }))
     })
 
     child.on('error', (err) => {
       if (timedOut) return
-      finish(`命令执行失败：${err.message}`)
+      finish(toolJson({
+        ok: false,
+        tool: 'exec_command',
+        mode: 'foreground',
+        command,
+        cwd: SANDBOX_ROOT,
+        stdout: trimCommandOutput(stdout),
+        stderr: trimCommandOutput(stderr),
+        error: err.message,
+      }))
     })
   })
 }
@@ -478,81 +563,327 @@ function execForeground(command, timeoutMs, signal) {
 // kill_process：停止后台进程（通过 PID）
 async function execKillProcess(args) {
   const pid = Number(args.pid)
-  if (!pid) return '错误：未提供 PID'
+  if (!pid) return toolJson({ ok: false, tool: 'kill_process', error: 'missing pid' })
   const entry = bgProcesses.get(pid)
-  if (!entry) return `错误：未找到 PID=${pid} 的后台进程（可能已退出）`
+  if (!entry) return toolJson({ ok: false, tool: 'kill_process', pid, error: 'process not found or already exited' })
   entry.process.kill()
   bgProcesses.delete(pid)
-  return `进程 PID=${pid} 已停止（命令：${entry.command}）`
+  return toolJson({
+    ok: true,
+    tool: 'kill_process',
+    pid,
+    command: entry.command,
+    stopped: true,
+  })
 }
 
 // list_processes：列出当前后台进程
 async function execListProcesses() {
-  if (bgProcesses.size === 0) return '当前没有运行中的后台进程。'
-  const lines = [...bgProcesses.entries()].map(([pid, { command, startedAt }]) =>
-    `PID=${pid}  启动于 ${startedAt.slice(11, 19)}  命令：${command}`
-  )
-  return `运行中的后台进程（${bgProcesses.size} 个）：\n${lines.join('\n')}`
+  const processes = [...bgProcesses.entries()].map(([pid, { command, startedAt }]) => ({
+    pid,
+    command,
+    started_at: startedAt,
+  }))
+  return toolJson({
+    ok: true,
+    tool: 'list_processes',
+    count: processes.length,
+    processes,
+  })
 }
 
-// fetch_url：获取网页内容，提取纯文本（带 TTL 缓存）
-async function execFetchUrl(args, context = {}) {
-  throwIfAborted(context.signal)
-  const url = args.url || args.URL || args.link
-  if (!url) return '错误：未提供 URL'
+const WEB_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+}
 
-  // 检查缓存
-  const cached = urlCache.get(url)
-  const ttl = getUrlTtl(url)
-  if (cached && Date.now() - cached.fetchedAt < ttl) {
-    const ageMin = Math.round((Date.now() - cached.fetchedAt) / 60000)
-    const ttlH = Math.round(ttl / 3600000)
-    console.log(`[fetch_url] 缓存命中（${ageMin}分钟前，TTL ${ttlH}h）: ${url}`)
-    return `[缓存内容，${ageMin}分钟前获取，${ttlH}小时内有效]\n${cached.content}`
-  }
+const BROWSER_VIEWPORT = { width: 1365, height: 900 }
 
-  console.log(`[fetch_url] → ${url}`)
-  let res
-  const merged = createMergedAbortSignal(context.signal, 10000)
-  try {
-    res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Jarvis/0.1)' },
-      signal: merged?.signal,
-    })
-  } catch (err) {
-    merged?.cleanup()
-    if (err.name === 'AbortError') throw err
-    console.log(`[fetch_url] 失败: ${url} — ${err.message}`)
-    return `请求失败：${err.message}（URL: ${url}）`
-  }
-  merged?.cleanup()
-  if (!res.ok) return `请求失败：HTTP ${res.status}（URL: ${url}）`
+function webJson(payload) {
+  return JSON.stringify(payload, null, 2)
+}
 
-  const html = await res.text()
+function normalizeWebUrl(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  if (/^https?:\/\//i.test(value)) return value
+  return `https://${value}`
+}
 
-  // 剥离 HTML 标签，保留可读文本
-  const text = html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
+function decodeHtmlEntities(value = '') {
+  return String(value)
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/\s{3,}/g, '\n\n')
+    .replace(/&#39;/g, "'")
+}
+
+function htmlToText(html = '') {
+  return decodeHtmlEntities(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|section|article|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
 
-  // 限制长度，避免上下文爆炸
-  const MAX = 3000
-  const result = text.length > MAX
-    ? `[内容节选，共 ${text.length} 字符]\n\n` + text.slice(0, MAX) + '\n\n...'
-    : text
+function extractTitle(html = '') {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  return match ? htmlToText(match[1]).slice(0, 200) : ''
+}
 
-  // 写入缓存
-  urlCache.set(url, { content: result, fetchedAt: Date.now() })
+function isLowValuePageText(text = '') {
+  const compact = String(text || '').replace(/\s+/g, ' ').trim()
+  if (compact.length < 80) return true
+  return /^(please wait|just a moment|checking your browser|enable javascript|access denied|forbidden|captcha|安全验证|请稍候|请稍等|正在验证|访问受限)/i.test(compact)
+}
 
-  return result
+async function launchReadableBrowser() {
+  const launchOptions = { headless: true }
+  try {
+    return await chromium.launch(launchOptions)
+  } catch (firstError) {
+    for (const channel of ['msedge', 'chrome']) {
+      try {
+        return await chromium.launch({ ...launchOptions, channel })
+      } catch {}
+    }
+    throw firstError
+  }
+}
+
+async function autoScrollPage(page, signal) {
+  for (let i = 0; i < 4; i++) {
+    throwIfAborted(signal)
+    await page.evaluate(() => window.scrollBy(0, Math.max(window.innerHeight, 800)))
+    await page.waitForTimeout(450)
+  }
+  await page.evaluate(() => window.scrollTo(0, 0))
+}
+
+function unwrapDuckDuckGoUrl(url) {
+  const decoded = decodeHtmlEntities(url)
+  const uddg = decoded.match(/[?&]uddg=([^&]+)/)
+  if (uddg) {
+    try { return decodeURIComponent(uddg[1]) } catch { return uddg[1] }
+  }
+  if (decoded.startsWith('//')) return `https:${decoded}`
+  return decoded
+}
+
+function parseDuckDuckGoResults(html, limit) {
+  const results = []
+  const resultRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
+  let match
+  while ((match = resultRegex.exec(html)) !== null && results.length < limit) {
+    const url = unwrapDuckDuckGoUrl(match[1])
+    const title = htmlToText(match[2])
+    if (!url || !title) continue
+    const nextStart = resultRegex.lastIndex
+    const nextMatch = html.slice(nextStart).match(/<a[^>]+class="result__a"/i)
+    const block = nextMatch ? html.slice(nextStart, nextStart + nextMatch.index) : html.slice(nextStart, nextStart + 2000)
+    const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>|class="result__snippet"[^>]*>([\s\S]*?)<\/div>/i)
+    const snippet = htmlToText(snippetMatch?.[1] || snippetMatch?.[2] || '').slice(0, 300)
+    results.push({ title, url, snippet })
+  }
+  return results
+}
+
+async function execWebSearch(args, context = {}) {
+  throwIfAborted(context.signal)
+  const query = String(args.query || args.q || args.keyword || '').trim()
+  const limit = Math.max(1, Math.min(Number(args.limit) || 5, 8))
+  if (!query) return webJson({ ok: false, tool: 'web_search', error: 'missing query' })
+
+  const cacheKey = `${query}::${limit}`
+  const cached = searchCache.get(cacheKey)
+  if (cached && Date.now() - cached.fetchedAt < 10 * 60 * 1000) {
+    return webJson({ ...cached.payload, cached: true })
+  }
+
+  const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+  console.log(`[web_search] ${query}`)
+  const merged = createMergedAbortSignal(context.signal, 12000)
+  let res
+  try {
+    res = await fetch(searchUrl, { headers: WEB_HEADERS, signal: merged?.signal })
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    return webJson({ ok: false, tool: 'web_search', query, error: err.message, hint: 'Search request failed. Try a more specific query or fetch a known reliable URL.' })
+  }
+  merged?.cleanup()
+
+  if (!res.ok) {
+    return webJson({ ok: false, tool: 'web_search', query, status: res.status, error: `HTTP ${res.status}`, hint: 'Search engine rejected the request. Try fetch_url with a known URL.' })
+  }
+
+  const html = await res.text()
+  const results = parseDuckDuckGoResults(html, limit)
+  const payload = results.length > 0
+    ? { ok: true, tool: 'web_search', query, source: 'duckduckgo_html', results, hint: 'Open 1-3 reliable result URLs with fetch_url, then answer the user.' }
+    : { ok: false, tool: 'web_search', query, source: 'duckduckgo_html', results: [], error: 'no results parsed', hint: 'Try a simpler query or a known URL.' }
+  if (payload.ok) searchCache.set(cacheKey, { payload, fetchedAt: Date.now() })
+  return webJson(payload)
+}
+
+// fetch_url: open a known URL, extract readable text, and return structured JSON.
+async function execFetchUrl(args, context = {}) {
+  throwIfAborted(context.signal)
+  const url = normalizeWebUrl(args.url || args.URL || args.link || args.href || args.uri)
+  if (!url) return webJson({ ok: false, tool: 'fetch_url', error: 'missing url' })
+
+  const cached = urlCache.get(url)
+  const ttl = getUrlTtl(url)
+  if (cached && Date.now() - cached.fetchedAt < ttl) {
+    const ageMin = Math.round((Date.now() - cached.fetchedAt) / 60000)
+    return webJson({ ...cached.payload, cached: true, cache_age_minutes: ageMin })
+  }
+
+  console.log(`[fetch_url] -> ${url}`)
+  let res
+  const merged = createMergedAbortSignal(context.signal, 12000)
+  try {
+    res = await fetch(url, { headers: WEB_HEADERS, signal: merged?.signal })
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    console.log(`[fetch_url] failed: ${url} - ${err.message}`)
+    return webJson({ ok: false, tool: 'fetch_url', url, error: err.message, hint: 'Network request failed. Use web_search to find an alternate source.' })
+  }
+  merged?.cleanup()
+
+  if (!res.ok) {
+    return webJson({ ok: false, tool: 'fetch_url', url, status: res.status, error: `HTTP ${res.status}`, hint: 'This page could not be read. Use web_search to find another accessible source; do not treat this as page content.' })
+  }
+
+  const contentType = res.headers.get('content-type') || ''
+  if (contentType && !/text|html|xml|json/i.test(contentType)) {
+    return webJson({ ok: false, tool: 'fetch_url', url, status: res.status, content_type: contentType, error: 'unsupported content type', hint: 'Use a text/html source for reading.' })
+  }
+
+  const html = await res.text()
+  const text = htmlToText(html)
+  const title = extractTitle(html)
+  if (isLowValuePageText(text)) {
+    return webJson({
+      ok: false,
+      tool: 'fetch_url',
+      url,
+      status: res.status,
+      title,
+      error: 'no readable content extracted',
+      content_preview: text.slice(0, 300),
+      content_length: text.length,
+      hint: 'The page opened, but readable article text was not extracted. It may require JavaScript rendering, block crawlers, or be an empty/verification page. Use web_search to find another accessible source.',
+    })
+  }
+  const MAX = 5000
+  const content = text.length > MAX ? `${text.slice(0, MAX)}\n\n...` : text
+  const payload = {
+    ok: true,
+    tool: 'fetch_url',
+    url,
+    status: res.status,
+    title,
+    content,
+    truncated: text.length > MAX,
+    content_length: text.length,
+    hint: 'Use this page content with other sources if needed, then answer the user.',
+  }
+
+  urlCache.set(url, { payload, fetchedAt: Date.now() })
+  return webJson(payload)
+}
+
+async function execBrowserRead(args, context = {}) {
+  throwIfAborted(context.signal)
+  const url = normalizeWebUrl(args.url || args.URL || args.link || args.href || args.uri)
+  if (!url) return webJson({ ok: false, tool: 'browser_read', error: 'missing url' })
+
+  const timeoutMs = Math.max(5000, Math.min(Number(args.timeout_ms || args.timeout || 20000), 45000))
+  const maxChars = Math.max(1000, Math.min(Number(args.max_chars || args.maxChars || 8000), 12000))
+  console.log(`[browser_read] -> ${url}`)
+
+  let browser
+  let page
+  try {
+    browser = await launchReadableBrowser()
+    const contextOptions = {
+      viewport: BROWSER_VIEWPORT,
+      locale: 'zh-CN',
+      userAgent: WEB_HEADERS['User-Agent'],
+    }
+    const browserContext = await browser.newContext(contextOptions)
+    page = await browserContext.newPage()
+    page.setDefaultTimeout(timeoutMs)
+    page.setDefaultNavigationTimeout(timeoutMs)
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
+    await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 12000) }).catch(() => {})
+    await autoScrollPage(page, context.signal)
+
+    const title = (await page.title()).trim()
+    const text = await page.evaluate(() => {
+      const selectors = ['script', 'style', 'noscript', 'svg', 'canvas', 'iframe']
+      selectors.forEach(selector => document.querySelectorAll(selector).forEach(el => el.remove()))
+      const candidates = [...document.querySelectorAll('article, main, [role="main"], .article, .post, .content')]
+      const best = candidates
+        .map(el => ({ el, text: (el.innerText || '').trim() }))
+        .sort((a, b) => b.text.length - a.text.length)[0]
+      return (best?.text && best.text.length > 200 ? best.text : document.body?.innerText || '').trim()
+    })
+    const finalUrl = page.url()
+    await browser.close()
+    browser = null
+
+    if (isLowValuePageText(text)) {
+      return webJson({
+        ok: false,
+        tool: 'browser_read',
+        url,
+        final_url: finalUrl,
+        title,
+        error: 'no readable content rendered',
+        content_preview: String(text || '').slice(0, 300),
+        content_length: String(text || '').length,
+        hint: 'The browser opened the page, but did not find readable article text. The page may require login, CAPTCHA, or block automation. Try another source.',
+      })
+    }
+
+    const content = text.length > maxChars ? `${text.slice(0, maxChars)}\n\n...` : text
+    return webJson({
+      ok: true,
+      tool: 'browser_read',
+      url,
+      final_url: finalUrl,
+      title,
+      content,
+      truncated: text.length > maxChars,
+      content_length: text.length,
+      hint: 'Rendered page content extracted by Chromium.',
+    })
+  } catch (err) {
+    if (err.name === 'AbortError') throw err
+    return webJson({
+      ok: false,
+      tool: 'browser_read',
+      url,
+      error: err.message || String(err),
+      hint: 'Browser rendering failed. Try fetch_url or another accessible source.',
+    })
+  } finally {
+    try { await page?.close() } catch {}
+    try { await browser?.close() } catch {}
+  }
 }
 
 // search_memory：主动搜索记忆

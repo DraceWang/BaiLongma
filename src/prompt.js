@@ -6,17 +6,13 @@ export function buildSystemPrompt({
   memories = '',
   directions = '',
   constraints = [],
-  conversationWindow = [],
   personMemory = null,
   thoughtStack = [],
   entities = [],
-  recentActions = [],
-  actionLog = [],
   hasActiveTask = false,
   task = null,
   taskKnowledge = '',
   extraContext = '',
-  lastToolResult = null,
   existenceDesc = '刚刚苏醒',
 } = {}) {
   const currentTime = nowTimestamp()
@@ -76,15 +72,11 @@ ${task}
     memories,
     directions,
     constraints,
-    conversationWindow,
     personMemory,
     thoughtStack,
     entities,
-    recentActions,
-    actionLog,
     taskKnowledge,
     extraContext,
-    lastToolResult,
   })
 
   return `${fixed}\n\n${taskSection}\n\n${dynamic}`.trim()
@@ -96,15 +88,11 @@ function buildDynamicSection({
   memories,
   directions,
   constraints,
-  conversationWindow,
   personMemory,
   thoughtStack,
   entities,
-  recentActions,
-  actionLog,
   taskKnowledge,
   extraContext,
-  lastToolResult,
 }) {
   const parts = []
 
@@ -122,15 +110,6 @@ function buildDynamicSection({
     parts.push(`## 关于 ${relatedEntity}\n${personMemory.content}\n${personMemory.detail || ''}`.trim())
   }
 
-  if (conversationWindow?.length > 0) {
-    const lines = conversationWindow.map(m => {
-      const time = m.timestamp.slice(11, 16)
-      if (m.role === 'user') return `[${time}] ${m.from_id}: ${m.content}`
-      return `[${time}] 我 → ${m.to_id}: ${m.content}`
-    }).join('\n')
-    parts.push(`## 近期对话\n${lines}\n\n这些对话已经发生。回复前先看上下文，避免重复、跑题或话太多；不要在结尾做总结，也不要复述用户已经知道的事。`)
-  }
-
   if (thoughtStack?.length > 0) {
     const lines = thoughtStack.map(t => `- ${t.concept}：${t.line}`).join('\n')
     parts.push(`## 念头\n${lines}`)
@@ -143,27 +122,6 @@ function buildDynamicSection({
   if (entities?.length > 0) {
     const list = entities.map(e => `- ${e.id}${e.label ? `（${e.label}）` : ''}`).join('\n')
     parts.push(`## 已知他者\n${list}`)
-  }
-
-  if (recentActions?.length > 0) {
-    const list = recentActions.map(a => `- ${a.ts.slice(11, 16)} ${a.summary}`).join('\n')
-    parts.push(`## 最近行动\n${list}\n\n这些事刚做过，不要立刻重复。`)
-  }
-
-  if (actionLog?.length > 0) {
-    const lines = actionLog.slice(-10).map(a => {
-      const detail = a.detail ? `\n  ${a.detail}` : ''
-      return `- ${a.timestamp?.slice(11, 16) || ''} ${a.tool || ''} · ${a.summary || ''}${detail}`
-    }).join('\n')
-    parts.push(`## 行动日志\n${lines}\n\n优先复用已有结果；若必须重复执行，先说明理由。`)
-  }
-
-  if (lastToolResult) {
-    const resultPreview = String(lastToolResult.result).slice(0, 500)
-    const argsSummary = Object.entries(lastToolResult.args || {})
-      .map(([k, v]) => `${k}=${String(v).slice(0, 60)}`)
-      .join(', ')
-    parts.push(`## 上一步工具结果\n${lastToolResult.name}(${argsSummary}) →\n${resultPreview}\n\n先吸收这个结果，再决定下一步，不要机械重复。`)
   }
 
   if (taskKnowledge) {
