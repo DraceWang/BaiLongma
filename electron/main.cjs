@@ -5,7 +5,7 @@ if (process.platform === 'win32') {
   } catch (_) {}
 }
 
-const { app, BrowserWindow, shell, dialog, Menu, ipcMain } = require('electron')
+const { app, BrowserWindow, shell, dialog, Menu, ipcMain, globalShortcut } = require('electron')
 const path = require('path')
 const net = require('net')
 const http = require('http')
@@ -99,6 +99,23 @@ async function createWindow() {
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  })
+
+  // 授予麦克风权限（语音输入需要）
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media') return callback(true)
+    callback(false)
+  })
+  mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+    if (permission === 'media') return true
+    return false
+  })
+
+  // F12 打开开发者工具（调试用）
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' && input.type === 'keyDown') {
+      mainWindow.webContents.toggleDevTools()
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -213,6 +230,7 @@ app.on('second-instance', () => {
 })
 
 app.on('window-all-closed', () => {
+  globalShortcut.unregisterAll()
   if (process.platform !== 'darwin') app.quit()
 })
 
@@ -231,4 +249,10 @@ app.whenReady().then(async () => {
 
   await createWindow()
   setupAutoUpdater()
+
+  // F11 切换全屏
+  globalShortcut.register('F11', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.setFullScreen(!mainWindow.isFullScreen())
+  })
 })

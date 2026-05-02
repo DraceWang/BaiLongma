@@ -8,7 +8,7 @@ const CANONICAL_AGENT_ENTITY = 'agent:jarvis'
 const CANONICAL_USER_ROOT_MEM_ID = 'person_000001'
 const CANONICAL_AGENT_ROOT_MEM_ID = 'agent_jarvis_identity'
 
-const USER_ID_ALIASES = new Set(['000001', 'id:000001', 'yuanda'])
+const USER_ID_ALIASES = new Set(['000001', 'id:000001', 'yuanda', '1187048501994078249'])
 const AGENT_ENTITY_ALIASES = new Set(['jarvis', 'agent_jarvis', 'agent:jarvis'])
 const USER_ROOT_ALIASES = new Set([
   'contact_000001',
@@ -191,6 +191,39 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_ui_signals_unconsumed ON ui_signals(consumed, ts);
   `)
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS media_history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind       TEXT    NOT NULL,
+      url        TEXT    NOT NULL,
+      title      TEXT    NOT NULL DEFAULT '',
+      video_id   TEXT,
+      platform   TEXT,
+      played_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_history_played_at ON media_history(played_at);
+  `)
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_history_url ON media_history(url)`) } catch {}
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS music_library (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      title      TEXT    NOT NULL DEFAULT '',
+      artist     TEXT    NOT NULL DEFAULT '',
+      album      TEXT    NOT NULL DEFAULT '',
+      file_path  TEXT    NOT NULL UNIQUE,
+      duration   INTEGER NOT NULL DEFAULT 0,
+      lrc        TEXT    NOT NULL DEFAULT '',
+      cover      TEXT    NOT NULL DEFAULT '',
+      source_url TEXT    NOT NULL DEFAULT '',
+      added_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_music_title  ON music_library(title);
+    CREATE INDEX IF NOT EXISTS idx_music_artist ON music_library(artist);
+    CREATE INDEX IF NOT EXISTS idx_music_added  ON music_library(added_at);
+  `)
+
   // 重建 FTS 索引（覆盖已有数据，确保历史记忆也被索引）
   db.exec(`INSERT INTO memories_fts(memories_fts) VALUES('rebuild')`)
 }
@@ -233,6 +266,15 @@ function normalizeMemoryEntity(entity) {
   const lower = String(entity).trim().toLowerCase()
   if (USER_ID_ALIASES.has(lower)) return CANONICAL_USER_ID
   if (AGENT_ENTITY_ALIASES.has(lower)) return CANONICAL_AGENT_ENTITY
+
+  // 处理平台复合 ID（如 discord:channelId:userId）：提取最后一段检查别名
+  const lastColon = lower.lastIndexOf(':')
+  if (lastColon !== -1 && lower.indexOf(':') !== lastColon) {
+    const lastSegment = lower.slice(lastColon + 1)
+    if (lastSegment && USER_ID_ALIASES.has(lastSegment)) return CANONICAL_USER_ID
+    if (lastSegment && AGENT_ENTITY_ALIASES.has(lastSegment)) return CANONICAL_AGENT_ENTITY
+  }
+
   return String(entity).trim()
 }
 
@@ -1302,4 +1344,70 @@ export function listPrefetchTasks() {
 export function getEnabledPrefetchTasks() {
   const db = getDB()
   return db.prepare(`SELECT * FROM prefetch_tasks WHERE enabled = 1 ORDER BY created_at ASC`).all()
+}
+
+// ── 媒体播放历史 ──────────────────────────────────────────────────────────────
+
+export function upsertMediaHistory({ kind, url, title = '', videoId = null, platform = null }) {
+  const db = getDB()
+  const now = new Date().toISOString()
+  db.prepare(`
+    INSERT INTO media_history (kind, url, title, video_id, platform, played_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(url) DO UPDATE SET
+      title     = excluded.title,
+      played_at = excluded.played_at
+  `).run(kind, url, title, videoId || null, platform || null, now)
+}
+
+export function getMediaHistory(limit = 30) {
+  const db = getDB()
+  return db.prepare(`
+    SELECT * FROM media_history ORDER BY played_at DESC LIMIT ?
+  `).all(limit)
+}
+
+// ── Music Library ────────────────────────────────────────────────────────────
+
+export function upsertMusicTrack({ title = '', artist = '', album = '', filePath, duration = 0, lrc = '', cover = '', sourceUrl = '' }) {
+  const db = getDB()
+  db.prepare(`
+    INSERT INTO music_library (title, artist, album, file_path, duration, lrc, cover, source_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(file_path) DO UPDATE SET
+      title      = excluded.title,
+      artist     = excluded.artist,
+      album      = excluded.album,
+      duration   = excluded.duration,
+      lrc        = CASE WHEN excluded.lrc != '' THEN excluded.lrc ELSE lrc END,
+      cover      = CASE WHEN excluded.cover != '' THEN excluded.cover ELSE cover END,
+      source_url = CASE WHEN excluded.source_url != '' THEN excluded.source_url ELSE source_url END
+  `).run(title, artist, album, filePath, duration, lrc, cover, sourceUrl)
+  return db.prepare(`SELECT * FROM music_library WHERE file_path = ?`).get(filePath)
+}
+
+export function getMusicTrack(id) {
+  return getDB().prepare(`SELECT * FROM music_library WHERE id = ?`).get(id)
+}
+
+export function searchMusicLibrary(query, limit = 20) {
+  const db = getDB()
+  const q = `%${query}%`
+  return db.prepare(`
+    SELECT * FROM music_library
+    WHERE title LIKE ? OR artist LIKE ? OR album LIKE ?
+    ORDER BY added_at DESC LIMIT ?
+  `).all(q, q, q, limit)
+}
+
+export function listMusicLibrary(limit = 50) {
+  return getDB().prepare(`SELECT * FROM music_library ORDER BY added_at DESC LIMIT ?`).all(limit)
+}
+
+export function updateMusicLrc(id, lrc) {
+  getDB().prepare(`UPDATE music_library SET lrc = ? WHERE id = ?`).run(lrc, id)
+}
+
+export function deleteMusicTrack(id) {
+  getDB().prepare(`DELETE FROM music_library WHERE id = ?`).run(id)
 }

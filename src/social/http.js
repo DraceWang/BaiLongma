@@ -28,7 +28,7 @@ export function readBody(req, maxBytes = 1024 * 1024) {
   })
 }
 
-export function requestJson(url, { method = 'GET', headers = {}, body = null } = {}) {
+export function requestJson(url, { method = 'GET', headers = {}, body = null, timeoutMs = 15000 } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body == null ? null : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))
     const req = https.request(url, {
@@ -46,6 +46,9 @@ export function requestJson(url, { method = 'GET', headers = {}, body = null } =
         try { data = text ? JSON.parse(text) : null } catch {}
         resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data, text })
       })
+    })
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`request timeout after ${timeoutMs}ms: ${url}`))
     })
     req.on('error', reject)
     if (payload) req.write(payload)

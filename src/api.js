@@ -5,17 +5,19 @@ import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { WebSocketServer } from 'ws'
 import { pushMessage } from './queue.js'
-import { getDB, getConfig, setConfig, insertUISignal } from './db.js'
+import { getDB, getConfig, setConfig, insertUISignal, upsertMediaHistory, getMediaHistory } from './db.js'
 import { emitEvent, addSSEClient, removeSSEClient, addACUIClient, removeACUIClient, removeActiveUICard } from './events.js'
 import { getQuotaStatus } from './quota.js'
 import { isRunning, stopLoop, startLoop } from './control.js'
 import { buildHeartbeatSystemPromptPreview } from './system-prompt-preview.js'
 import { paths } from './paths.js'
-import { config, activate as activateLLM, getActivationStatus, switchModel, getMinimaxKey, setMinimaxKey, DEEPSEEK_MODELS, MINIMAX_MODELS } from './config.js'
+import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getSocialConfig, setSocialConfig, DEEPSEEK_MODELS, MINIMAX_MODELS } from './config.js'
+import { restartConnector } from './social/index.js'
 import { replaceProvider } from './providers/registry.js'
 import { persistAppState } from './capabilities/executor.js'
 import { MinimaxProvider } from './providers/minimax.js'
 import { handleSocialWebhook, isSocialWebhookPath } from './social/webhooks.js'
+import { startVoiceServer, stopVoiceServer, getVoiceStatus } from './voice/manager.js'
 
 export { emitEvent }
 
@@ -395,6 +397,30 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       return
     }
 
+    // GET /media/history?limit=30
+    if (req.method === 'GET' && url.pathname === '/media/history') {
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '30'), 100)
+      jsonResponse(res, 200, getMediaHistory(limit))
+      return
+    }
+
+    // POST /media/history — { kind, url, title, videoId, platform }
+    if (req.method === 'POST' && url.pathname === '/media/history') {
+      const chunks = []
+      req.on('data', c => chunks.push(c))
+      req.on('end', () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString())
+          if (!body.url || !body.kind) return jsonResponse(res, 400, { ok: false, error: 'url and kind required' })
+          upsertMediaHistory(body)
+          jsonResponse(res, 200, { ok: true })
+        } catch (e) {
+          jsonResponse(res, 400, { ok: false, error: e.message })
+        }
+      })
+      return
+    }
+
     // GET /favicon.ico ? silence the browser's automatic favicon request
     if (req.method === 'GET' && url.pathname === '/favicon.ico') {
       res.writeHead(204)
@@ -489,6 +515,7 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
           provider: status.provider,
           model: status.model,
           models: status.models,
+          temperature: config.temperature,
         },
         providers: {
           deepseek: { models: DEEPSEEK_MODELS },
@@ -511,6 +538,55 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
           const result = switchModel(model)
           emitEvent('model_switched', result)
           jsonResponse(res, 200, { ok: true, ...result })
+        } catch (err) {
+          jsonResponse(res, 400, { ok: false, error: err.message })
+        }
+      })
+      return
+    }
+
+    // POST /settings/temperature — 设置 LLM temperature
+    if (req.method === 'POST' && url.pathname === '/settings/temperature') {
+      const chunks = []
+      req.on('data', chunk => chunks.push(chunk))
+      req.on('end', () => {
+        try {
+          const { temperature } = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
+          const result = setTemperature(temperature)
+          jsonResponse(res, 200, { ok: true, ...result })
+        } catch (err) {
+          jsonResponse(res, 400, { ok: false, error: err.message })
+        }
+      })
+      return
+    }
+
+    // GET /settings/social — 读取各平台配置状态（不返回明文 key）
+    if (req.method === 'GET' && url.pathname === '/settings/social') {
+      jsonResponse(res, 200, { ok: true, social: getSocialConfig() })
+      return
+    }
+
+    // POST /settings/social — 保存平台凭证，并热重启受影响的连接器
+    if (req.method === 'POST' && url.pathname === '/settings/social') {
+      const chunks = []
+      req.on('data', chunk => chunks.push(chunk))
+      req.on('end', async () => {
+        try {
+          const updates = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
+          setSocialConfig(updates)
+          // 哪些平台的 key 被更新了，就重启对应连接器
+          const PLATFORM_KEYS = {
+            discord: ['DISCORD_BOT_TOKEN'],
+          }
+          for (const [platform, keys] of Object.entries(PLATFORM_KEYS)) {
+            if (keys.some(k => updates[k])) {
+              restartConnector(platform, { pushMessage, emitEvent }).catch(err =>
+                console.warn(`[social] restart ${platform} failed:`, err.message)
+              )
+            }
+          }
+          jsonResponse(res, 200, { ok: true, social: getSocialConfig() })
         } catch (err) {
           jsonResponse(res, 400, { ok: false, error: err.message })
         }
@@ -747,6 +823,36 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       try { clearDir(sandboxPath) } catch (_) {}
       emitEvent('admin', { action: 'reset-files' })
       jsonResponse(res, 200, { ok: true })
+      return
+    }
+
+    // GET /voice/status — 语音服务状态
+    if (req.method === 'GET' && url.pathname === '/voice/status') {
+      jsonResponse(res, 200, { ok: true, voice: getVoiceStatus() })
+      return
+    }
+
+    // POST /voice/start — 启动语音服务 { model: 'base' }
+    if (req.method === 'POST' && url.pathname === '/voice/start') {
+      const chunks = []
+      req.on('data', chunk => chunks.push(chunk))
+      req.on('end', () => {
+        try {
+          const body = Buffer.concat(chunks).toString('utf-8')
+          const { model = 'turbo' } = body ? JSON.parse(body) : {}
+          const result = startVoiceServer({ model })
+          jsonResponse(res, 200, { ok: true, voice: result })
+        } catch (err) {
+          jsonResponse(res, 400, { ok: false, error: err.message })
+        }
+      })
+      return
+    }
+
+    // POST /voice/stop — 停止语音服务
+    if (req.method === 'POST' && url.pathname === '/voice/stop') {
+      const result = stopVoiceServer()
+      jsonResponse(res, 200, { ok: true, voice: result })
       return
     }
 

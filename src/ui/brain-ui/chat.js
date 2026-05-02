@@ -192,20 +192,22 @@ export function initChat({
     }
   }
 
-  async function send() {
+  async function send({ channel = null, label = null } = {}) {
     if (inputLocked) return;
     const text = msgInput.value.trim();
     if (!text) return;
     msgInput.value = "";
-    addMsg("user", text);
+    addMsg("user", text, { label: label || undefined });
     openChat();
     scheduleClose(1000);
 
     try {
+      const payload = { content: text, from_id: "ID:000001" };
+      if (channel) payload.channel = channel;
       await fetch(`${apiBase}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text, from_id: "ID:000001" }),
+        body: JSON.stringify(payload),
       });
     } catch (error) {
       console.warn("[send]", error.message);
@@ -256,7 +258,7 @@ export function initChat({
     isTyping,
     openChat,
     restoreChatHistory,
+    send,
     unlockAudioOnFirstGesture,
   };
 }
-

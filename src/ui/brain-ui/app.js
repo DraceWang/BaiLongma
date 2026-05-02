@@ -4,6 +4,7 @@ import { bootstrapACUI } from "./acui/bootstrap.js";
 import { initChat } from "./chat.js";
 import { initPanelCollapse } from "./panel-collapse.js";
 import { ThoughtStream } from "./thought-stream.js";
+import { initVoicePanel } from "./voice-panel.js";
 renderBrainUiApp(document.body);
 const THEME_KEY = "jarvis-brain-ui-theme";
 const PHYSICS_STORAGE_KEY = "jarvis-brain-ui-physics";
@@ -16,6 +17,7 @@ const MIN_UI_ZOOM = 0.8;
 const MAX_UI_ZOOM = 1.8;
 const UI_ZOOM_STEP = 0.1;
 const UI_ZOOM_WHEEL_STEP = 0.05;
+const MEMORY_GRAPH_ENABLED = false;
 
 const themeSwitcher = document.getElementById("theme-switcher");
 const resetViewBtn = document.getElementById("reset-view-btn");
@@ -320,7 +322,7 @@ function applyTheme(theme) {
   setTimeout(() => {
     refreshThemeColors();
     renderLegend();
-    if (nodeSel && !nodeSel.empty()) {
+    if (MEMORY_GRAPH_ENABLED && nodeSel && !nodeSel.empty()) {
       refreshNodeVisuals();
       linkSel.attr("stroke", themeColors.linkStroke);
     }
@@ -438,6 +440,7 @@ function isGlowing(nid) {
 }
 
 function highlightNodes(nids, duration = 2400) {
+  if (!MEMORY_GRAPH_ENABLED || !sim) return;
   if (!nids || !nids.length) return;
   const now = Date.now();
   const expiry = now + duration;
@@ -506,17 +509,19 @@ function nodeRadius(d) {
   return Math.min(scaledBase * 2.5, scaledBase * childScale * glowScale * Math.max(1, pulseScale));
 }
 
-const sim = d3.forceSimulation()
-  .force("link", d3.forceLink().id(d => d._nid))
-  .force("charge", d3.forceManyBody())
-  .force("center", d3.forceCenter(W / 2, H / 2 - 10))
-  .force("x", d3.forceX(W / 2))
-  .force("y", d3.forceY(H / 2 - 10))
-  .force("radial", d3.forceRadial(180, W / 2, H / 2 - 10))
-  .force("collision", d3.forceCollide())
-  .alphaDecay(0.028)
-  .velocityDecay(0.3)
-  .on("tick", tick);
+const sim = MEMORY_GRAPH_ENABLED
+  ? d3.forceSimulation()
+    .force("link", d3.forceLink().id(d => d._nid))
+    .force("charge", d3.forceManyBody())
+    .force("center", d3.forceCenter(W / 2, H / 2 - 10))
+    .force("x", d3.forceX(W / 2))
+    .force("y", d3.forceY(H / 2 - 10))
+    .force("radial", d3.forceRadial(180, W / 2, H / 2 - 10))
+    .force("collision", d3.forceCollide())
+    .alphaDecay(0.028)
+    .velocityDecay(0.3)
+    .on("tick", tick)
+  : null;
 
 function linkDistance(link) {
   const countFactor = Math.min(34, Math.sqrt(Math.max(1, nodeData.length)) * 4.2);
@@ -553,6 +558,7 @@ function collisionRadius(node) {
 }
 
 function updateSimulationForces() {
+  if (!MEMORY_GRAPH_ENABLED || !sim) return;
   sim.force("link")
     .distance(linkDistance)
     .strength(linkStrength);
@@ -582,6 +588,10 @@ function updateSimulationForces() {
 
 function applyPhysicsSettings(restartAlpha = 2) {
   updatePhysicsReadout();
+  if (!MEMORY_GRAPH_ENABLED || !sim) {
+    savePhysicsSettings();
+    return;
+  }
   updateSimulationForces();
   refreshNodeVisuals();
   sim.alpha(Math.max(sim.alpha(), restartAlpha)).restart();
@@ -589,6 +599,7 @@ function applyPhysicsSettings(restartAlpha = 2) {
 }
 
 function refreshNodeVisuals() {
+  if (!MEMORY_GRAPH_ENABLED) return;
   if (!nodeSel || nodeSel.empty()) return;
   nodeSel
     .attr("r", nodeRadius)
@@ -598,6 +609,7 @@ function refreshNodeVisuals() {
 }
 
 function dampTangentialMotion() {
+  if (!MEMORY_GRAPH_ENABLED || !sim) return;
   const cx = W / 2;
   const cy = H / 2 - 10;
   const twitching = sim.alpha() > 0.45;
@@ -626,6 +638,7 @@ function dampTangentialMotion() {
 }
 
 function naturalTwitch() {
+  if (!MEMORY_GRAPH_ENABLED || !sim) return;
   if (nodeData.length < 2) {
     sim.alpha(1).restart();
     return;
@@ -668,6 +681,7 @@ function naturalTwitch() {
 }
 
 function tick() {
+  if (!MEMORY_GRAPH_ENABLED) return;
   dampTangentialMotion();
 
   linkSel
@@ -775,6 +789,11 @@ function renderLegend() {
 }
 
 function renderGraph(restartAlpha = 2) {
+  if (!MEMORY_GRAPH_ENABLED || !sim) {
+    updateStats();
+    renderLegend();
+    return;
+  }
   computeDegrees();
   markCore();
   updateStats();
@@ -960,6 +979,7 @@ function findAnchorNode(memory, nodeMap) {
 }
 
 async function loadMemories() {
+  if (!MEMORY_GRAPH_ENABLED) return;
   try {
     const rows = await fetch(`${API}/memories?limit=120`).then(r => r.json());
     if (!Array.isArray(rows)) return;
@@ -996,6 +1016,7 @@ async function loadMemories() {
 }
 
 function addNewNodes(memories) {
+  if (!MEMORY_GRAPH_ENABLED) return;
   const nodeMap = new Map(nodeData.map(n => [n._nid, n]));
   const newNids = [];
   memories.forEach(memory => {
@@ -1028,8 +1049,10 @@ function addNewNodes(memories) {
   highlightNodes(newNids, 10000);
 }
 
-setInterval(() => naturalTwitch(), 6000);
-setInterval(() => { nodeData.forEach(n => { if (n._strength) n._strength *= 0.97; }); }, 2500);
+if (MEMORY_GRAPH_ENABLED) {
+  setInterval(() => naturalTwitch(), 6000);
+  setInterval(() => { nodeData.forEach(n => { if (n._strength) n._strength *= 0.97; }); }, 2500);
+}
 
 function parseUserMessageInput(raw) {
   const text = String(raw || "");
@@ -1195,6 +1218,9 @@ function handle({ type, data = {} }) {
     case "agent_name_updated":
       setAgentName(data.name);
       break;
+    case "media_mode":
+      window.dispatchEvent(new CustomEvent("bailongma:media", { detail: data }));
+      break;
     default:
       break;
   }
@@ -1212,6 +1238,7 @@ window.addEventListener("resize", () => {
   W = window.innerWidth;
   H = window.innerHeight;
   svg.attr("width", W).attr("height", H);
+  if (!MEMORY_GRAPH_ENABLED || !sim) return;
   sim.force("center", d3.forceCenter(W / 2, H / 2 - 10))
      .force("x", d3.forceX(W / 2))
      .force("y", d3.forceY(H / 2 - 10))
@@ -1222,6 +1249,7 @@ window.addEventListener("resize", () => {
 
 let _lastVisualRefresh = 0;
 d3.timer(() => {
+  if (!MEMORY_GRAPH_ENABLED) return true;
   if (glowSet.size === 0 && usePulseSet.size === 0) return;
   const now = Date.now();
   if (now - _lastVisualRefresh < 48) return;
@@ -1242,10 +1270,12 @@ chat = initChat({
   defaultInputPlaceholder,
 });
 chat.applyActivationWarmupLock();
-loadMemories();
-setInterval(() => {
+if (MEMORY_GRAPH_ENABLED) {
   loadMemories();
-}, 5 * 60 * 1000);
+  setInterval(() => {
+    loadMemories();
+  }, 5 * 60 * 1000);
+}
 connectSSE();
 loadAgentProfile();
 chat.restoreChatHistory();
@@ -1267,33 +1297,54 @@ window.addEventListener("beforeunload", () => {
   const settingsBtn     = document.getElementById("settings-btn");
   const overlay         = document.getElementById("settings-overlay");
   const closeBtn        = document.getElementById("settings-close");
-  const currentModel    = document.getElementById("settings-current-model");
   const providerSelect  = document.getElementById("settings-provider-select");
   const modelSelect     = document.getElementById("settings-model-select");
   const llmKeyInput     = document.getElementById("settings-llm-key");
   const saveLlmBtn      = document.getElementById("settings-save-llm");
   const llmFeedback     = document.getElementById("settings-llm-feedback");
-  const minimaxStatus   = document.getElementById("settings-minimax-status");
+  const tempSlider      = document.getElementById("settings-temperature");
+  const tempVal         = document.getElementById("settings-temperature-val");
+  const saveTempBtn     = document.getElementById("settings-save-temperature");
+  const tempFeedback    = document.getElementById("settings-temperature-feedback");
   const minimaxKeyInput = document.getElementById("settings-minimax-key");
   const saveMinimaxBtn  = document.getElementById("settings-save-minimax");
   const minimaxFeedback = document.getElementById("settings-minimax-feedback");
+  const saveSocialBtn   = document.getElementById("settings-save-social");
+  const socialFeedback  = document.getElementById("settings-social-feedback");
+  const saveVoiceBtn    = document.getElementById("settings-save-voice");
+  const voiceFeedback   = document.getElementById("settings-voice-feedback");
+  const voiceThreshSlider = document.getElementById("settings-voice-threshold");
+  const voiceThreshVal    = document.getElementById("settings-voice-threshold-val");
 
   if (!settingsBtn || !overlay) return;
 
   let cachedProviders = null;
 
+  // ── Tab 切换 ──
+  overlay.querySelectorAll(".settings-nav-item").forEach(btn => {
+    btn.addEventListener("click", () => {
+      overlay.querySelectorAll(".settings-nav-item").forEach(b => b.classList.remove("active"));
+      overlay.querySelectorAll(".settings-tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      const tab = btn.dataset.tab;
+      overlay.querySelector(`.settings-tab[data-tab="${tab}"]`)?.classList.add("active");
+      if (tab === "social") loadSocialSettings();
+    });
+  });
+
   function showFeedback(el, msg, isError = false) {
+    if (!el) return;
     el.textContent = msg;
     el.className = "settings-feedback" + (isError ? " error" : "");
     setTimeout(() => { el.textContent = ""; el.className = "settings-feedback"; }, 3000);
   }
 
+  // ── LLM / 媒体 ──
   function refreshConfigSummary({ llm, minimax }) {
     const cfgLlm = document.getElementById("settings-cfg-llm");
     const cfgLlmDot = document.getElementById("settings-cfg-llm-dot");
     const cfgMedia = document.getElementById("settings-cfg-media");
     const cfgMediaDot = document.getElementById("settings-cfg-media-dot");
-
     if (cfgLlm) cfgLlm.textContent = `${llm.provider || "—"} · ${llm.model || "—"}`;
     if (cfgLlmDot) {
       cfgLlmDot.textContent = "●";
@@ -1307,52 +1358,191 @@ window.addEventListener("beforeunload", () => {
     }
   }
 
-  function populateModelSelect(models, currentModel) {
+  function populateModelSelect(models, current) {
     if (!modelSelect || !models) return;
     modelSelect.innerHTML = models
       .map(m => `<option value="${m.id}"${m.deprecated ? " data-deprecated" : ""}>${m.label}</option>`)
       .join("");
-    if (currentModel) modelSelect.value = currentModel;
+    if (current) modelSelect.value = current;
   }
 
   async function loadSettings() {
     try {
       const data = await fetch(`${API}/settings`).then(r => r.json());
       const { llm, minimax, providers } = data;
-
       if (providers) cachedProviders = providers;
-
       refreshConfigSummary({ llm, minimax });
-
-      if (currentModel) currentModel.textContent = llm.model || "—";
-
-      if (providerSelect && llm.provider) {
-        providerSelect.value = llm.provider;
-      }
-
+      if (providerSelect && llm.provider) providerSelect.value = llm.provider;
       populateModelSelect(llm.models, llm.model);
-
-      if (minimaxStatus) {
-        minimaxStatus.textContent = minimax.configured ? "✓ 已配置" : "未配置";
-        minimaxStatus.style.color = minimax.configured ? "var(--cool)" : "var(--dim)";
+      // 同步 temperature 滑块
+      if (typeof llm.temperature === "number" && tempSlider) {
+        tempSlider.value = String(llm.temperature);
+        if (tempVal) tempVal.textContent = llm.temperature.toFixed(2);
       }
     } catch {}
   }
 
-  function openSettings() {
+  // ── 社交媒体 ──
+  const SOCIAL_FIELD_MAP = {
+    "social-discord-token":  "DISCORD_BOT_TOKEN",
+    "social-feishu-appid":   "FEISHU_APP_ID",
+    "social-feishu-secret":  "FEISHU_APP_SECRET",
+    "social-feishu-token":   "FEISHU_VERIFICATION_TOKEN",
+    "social-wechat-appid":   "WECHAT_OFFICIAL_APP_ID",
+    "social-wechat-secret":  "WECHAT_OFFICIAL_APP_SECRET",
+    "social-wechat-token":   "WECHAT_OFFICIAL_TOKEN",
+    "social-wecom-botkey":   "WECOM_BOT_KEY",
+    "social-wecom-token":    "WECOM_INCOMING_TOKEN",
+  };
+
+  const SOCIAL_PLATFORM_STATUS = {
+    "social-status-discord": ["DISCORD_BOT_TOKEN"],
+    "social-status-feishu":  ["FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_VERIFICATION_TOKEN"],
+    "social-status-wechat":  ["WECHAT_OFFICIAL_APP_ID", "WECHAT_OFFICIAL_APP_SECRET", "WECHAT_OFFICIAL_TOKEN"],
+    "social-status-wecom":   ["WECOM_BOT_KEY", "WECOM_INCOMING_TOKEN"],
+  };
+
+  async function loadSocialSettings() {
+    try {
+      const { social } = await fetch(`${API}/settings/social`).then(r => r.json());
+      for (const [statusId, keys] of Object.entries(SOCIAL_PLATFORM_STATUS)) {
+        const el = document.getElementById(statusId);
+        if (!el) continue;
+        const configuredCount = keys.filter(k => social[k]?.configured).length;
+        if (configuredCount === keys.length) {
+          el.textContent = "● 已配置";
+          el.className = "settings-platform-status ok";
+        } else if (configuredCount > 0) {
+          el.textContent = `● 部分配置 (${configuredCount}/${keys.length})`;
+          el.className = "settings-platform-status miss";
+        } else {
+          el.textContent = "○ 未配置";
+          el.className = "settings-platform-status miss";
+        }
+      }
+    } catch {}
+  }
+
+  if (saveSocialBtn) {
+    saveSocialBtn.addEventListener("click", async () => {
+      const updates = {};
+      for (const [fieldId, envKey] of Object.entries(SOCIAL_FIELD_MAP)) {
+        const val = document.getElementById(fieldId)?.value?.trim() || "";
+        if (val) updates[envKey] = val;
+      }
+      saveSocialBtn.disabled = true;
+      try {
+        const res = await fetch(`${API}/settings/social`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showFeedback(socialFeedback, "已保存");
+          // 清空输入框并刷新状态指示
+          Object.keys(SOCIAL_FIELD_MAP).forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = "";
+          });
+          loadSocialSettings();
+        } else {
+          showFeedback(socialFeedback, data.error || "保存失败", true);
+        }
+      } catch {
+        showFeedback(socialFeedback, "请求失败", true);
+      } finally {
+        saveSocialBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── temperature 滑块 ──
+  if (tempSlider && tempVal) {
+    tempSlider.addEventListener("input", () => {
+      tempVal.textContent = parseFloat(tempSlider.value).toFixed(2);
+    });
+  }
+  if (saveTempBtn) {
+    saveTempBtn.addEventListener("click", async () => {
+      const temperature = parseFloat(tempSlider?.value ?? "0.5");
+      saveTempBtn.disabled = true;
+      try {
+        const res = await fetch(`${API}/settings/temperature`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ temperature }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showFeedback(tempFeedback, `已设置 ${data.temperature.toFixed(2)}`);
+        } else {
+          showFeedback(tempFeedback, data.error || "保存失败", true);
+        }
+      } catch { showFeedback(tempFeedback, "请求失败", true); }
+      finally { saveTempBtn.disabled = false; }
+    });
+  }
+
+  // ── 语音设置持久化 ──
+  const VOICE_LANG_KEY       = "bailongma-voice-lang";
+  const VOICE_AUTO_SEND_KEY  = "bailongma-voice-auto-send";
+  const VOICE_THRESHOLD_KEY  = "bailongma-voice-threshold";
+
+  function loadVoiceSettings() {
+    const langSelect = document.getElementById("voice-lang-select");
+    const autoSend   = document.getElementById("voice-auto-send");
+    if (langSelect) langSelect.value = localStorage.getItem(VOICE_LANG_KEY) || "zh-CN";
+    if (autoSend) autoSend.checked = localStorage.getItem(VOICE_AUTO_SEND_KEY) !== "false";
+    // threshold 滑块
+    const savedThresh = parseFloat(localStorage.getItem(VOICE_THRESHOLD_KEY) || "0.008");
+    if (voiceThreshSlider) voiceThreshSlider.value = String(savedThresh);
+    if (voiceThreshVal)    voiceThreshVal.textContent = savedThresh.toFixed(3);
+  }
+
+  if (voiceThreshSlider && voiceThreshVal) {
+    voiceThreshSlider.addEventListener("input", () => {
+      voiceThreshVal.textContent = parseFloat(voiceThreshSlider.value).toFixed(3);
+    });
+  }
+
+  if (saveVoiceBtn) {
+    saveVoiceBtn.addEventListener("click", () => {
+      const lang      = document.getElementById("voice-lang-select")?.value || "zh-CN";
+      const autoSend  = document.getElementById("voice-auto-send")?.checked ?? true;
+      const threshold = parseFloat(voiceThreshSlider?.value ?? "0.008");
+      localStorage.setItem(VOICE_LANG_KEY, lang);
+      localStorage.setItem(VOICE_AUTO_SEND_KEY, String(autoSend));
+      localStorage.setItem(VOICE_THRESHOLD_KEY, String(threshold));
+      showFeedback(voiceFeedback, "已保存，下次启动语音后生效");
+      // 广播给 voice-panel.js
+      window.dispatchEvent(new CustomEvent("bailongma:voice-threshold", { detail: { threshold } }));
+    });
+  }
+
+  // ── 开关 ──
+  function openSettings(tab = null) {
     overlay.hidden = false;
     loadSettings();
+    loadVoiceSettings();
+    if (tab) {
+      overlay.querySelectorAll(".settings-nav-item").forEach(b => {
+        b.classList.toggle("active", b.dataset.tab === tab);
+      });
+      overlay.querySelectorAll(".settings-tab").forEach(t => {
+        t.classList.toggle("active", t.dataset.tab === tab);
+      });
+      if (tab === "social") loadSocialSettings();
+    }
   }
 
   function closeSettings() {
     overlay.hidden = true;
-    llmKeyInput.value = "";
-    minimaxKeyInput.value = "";
-    llmFeedback.textContent = "";
-    minimaxFeedback.textContent = "";
+    if (llmKeyInput) llmKeyInput.value = "";
+    if (minimaxKeyInput) minimaxKeyInput.value = "";
   }
 
-  settingsBtn.addEventListener("click", openSettings);
+  settingsBtn.addEventListener("click", () => openSettings());
   closeBtn.addEventListener("click", closeSettings);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSettings(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !overlay.hidden) closeSettings(); });
@@ -1360,33 +1550,22 @@ window.addEventListener("beforeunload", () => {
   if (providerSelect) {
     providerSelect.addEventListener("change", () => {
       const provider = providerSelect.value;
-      if (cachedProviders && cachedProviders[provider]) {
-        populateModelSelect(cachedProviders[provider].models, null);
-      }
+      if (cachedProviders?.[provider]) populateModelSelect(cachedProviders[provider].models, null);
     });
   }
 
-  saveLlmBtn.addEventListener("click", async () => {
-    const model = modelSelect.value;
+  saveLlmBtn?.addEventListener("click", async () => {
+    const model  = modelSelect.value;
     const apiKey = llmKeyInput.value.trim();
-    const provider = providerSelect ? providerSelect.value : "deepseek";
+    const provider = providerSelect?.value || "deepseek";
     saveLlmBtn.disabled = true;
     try {
-      let res, data;
-      if (apiKey) {
-        res = await fetch(`${API}/activate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider, apiKey, model }),
-        });
-      } else {
-        res = await fetch(`${API}/settings/model`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model }),
-        });
-      }
-      data = await res.json();
+      const res = await fetch(apiKey ? `${API}/activate` : `${API}/settings/model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apiKey ? { provider, apiKey, model } : { model }),
+      });
+      const data = await res.json();
       if (data.ok) {
         showFeedback(llmFeedback, "已保存");
         llmKeyInput.value = "";
@@ -1394,14 +1573,11 @@ window.addEventListener("beforeunload", () => {
       } else {
         showFeedback(llmFeedback, data.error || "保存失败", true);
       }
-    } catch (err) {
-      showFeedback(llmFeedback, "请求失败", true);
-    } finally {
-      saveLlmBtn.disabled = false;
-    }
+    } catch { showFeedback(llmFeedback, "请求失败", true); }
+    finally { saveLlmBtn.disabled = false; }
   });
 
-  saveMinimaxBtn.addEventListener("click", async () => {
+  saveMinimaxBtn?.addEventListener("click", async () => {
     const apiKey = minimaxKeyInput.value.trim();
     if (!apiKey) { showFeedback(minimaxFeedback, "Key 不能为空", true); return; }
     saveMinimaxBtn.disabled = true;
@@ -1419,10 +1595,615 @@ window.addEventListener("beforeunload", () => {
       } else {
         showFeedback(minimaxFeedback, data.error || "保存失败", true);
       }
+    } catch { showFeedback(minimaxFeedback, "请求失败", true); }
+    finally { saveMinimaxBtn.disabled = false; }
+  });
+})();
+
+// ── Voice panel ──
+initVoicePanel({
+  btnId:      "voice-btn",
+  panelId:    "voice-panel",
+  canvasId:   "voice-canvas",
+  statusId:   "voice-status",
+  transcriptId: "voice-transcript",
+  getChatInput:  () => document.getElementById("msg-input"),
+  getSendBtn:    () => document.getElementById("send-btn"),
+  getSendMessage: (options) => chat?.send?.(options),
+  getLang:       () => localStorage.getItem("bailongma-voice-lang") || "zh-CN",
+  getAutoSend:   () => localStorage.getItem("bailongma-voice-auto-send") !== "false",
+});
+
+// ── Media modes (video / image) ──
+(function initMediaModes() {
+  const videoBtn      = document.getElementById("video-btn");
+  const videoExitBtn  = document.getElementById("video-exit-btn");
+  const videoFeed     = document.getElementById("video-feed");
+  const videoFrame    = document.getElementById("video-frame");
+  const videoSurface  = document.getElementById("video-surface");
+  const videoBackdrop = document.getElementById("video-backdrop");
+  const videoTitle    = document.getElementById("video-title");
+  const imageExitBtn  = document.getElementById("image-exit-btn");
+  const imageDisplay  = document.getElementById("image-display");
+  const imageSurface  = document.getElementById("image-surface");
+  const imageTitle    = document.getElementById("image-title");
+
+  let videoStream = null;
+  let videoActive = false;
+  let imageActive = false;
+  let videoKind   = "empty";
+  let currentVideoSource = "";
+  let currentVideoStart = null;
+
+  function normalizeUrl(url = "") {
+    return String(url || "").trim();
+  }
+
+  function localPathToUrl(src) {
+    const s = String(src || "").trim();
+    if (!s) return "";
+    if (/^https?:\/\//i.test(s) || /^file:\/\//i.test(s)) return s;
+    // Windows / Unix local path → file:// URL
+    return "file:///" + s.replace(/\\/g, "/").replace(/^\/+/, "");
+  }
+
+  function extractYoutubeId(url) {
+    return normalizeUrl(url).match(
+      /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([A-Za-z0-9_-]{6,})/
+    )?.[1] || null;
+  }
+
+  function youtubeEmbedUrl(url, { autoplay = false, start = null } = {}) {
+    const id = extractYoutubeId(url);
+    if (!id) return null;
+    const params = new URLSearchParams({
+      enablejsapi: "1",
+      playsinline: "1",
+      rel: "0",
+      autoplay: autoplay ? "1" : "0",
+    });
+    if (Number.isFinite(Number(start))) params.set("start", String(Math.max(0, Math.round(Number(start)))));
+    return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+  }
+
+  function extractBilibiliId(url) {
+    const raw = normalizeUrl(url);
+    return raw.match(/\/video\/(BV[A-Za-z0-9]+)/i)?.[1]
+        || raw.match(/\b(BV[A-Za-z0-9]+)\b/i)?.[1]
+        || null;
+  }
+
+  function bilibiliEmbedUrl(url, { autoplay = false, start = null } = {}) {
+    const bvid = extractBilibiliId(url);
+    if (!bvid) return null;
+    const params = new URLSearchParams({
+      bvid,
+      autoplay: autoplay ? "1" : "0",
+      high_quality: "1",
+    });
+    if (Number.isFinite(Number(start))) params.set("t", String(Math.max(0, Math.round(Number(start)))));
+    return `https://player.bilibili.com/player.html?${params.toString()}`;
+  }
+
+  function iframeUrlFor(url, options) {
+    return youtubeEmbedUrl(url, options) || bilibiliEmbedUrl(url, options);
+  }
+
+  // ── 历史记录 ──────────────────────────────────────────────────────────────
+  function saveMediaHistory({ url, title, kind, videoId = null, platform = null }) {
+    fetch(`${API}/media/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, title: title || "", kind, videoId, platform }),
+    }).catch(() => {});
+  }
+
+  // ── YouTube oEmbed 预验证（异步，不阻塞显示） ────────────────────────────
+  async function validateYoutubeUrl(url) {
+    try {
+      const oembed = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+      const res = await fetch(oembed, { signal: AbortSignal.timeout(5000) });
+      return res.ok;
     } catch {
-      showFeedback(minimaxFeedback, "请求失败", true);
-    } finally {
-      saveMinimaxBtn.disabled = false;
+      return null; // 网络失败时不做判断，允许继续
+    }
+  }
+
+  // ── 摄像头 ────────────────────────────────────────────────────────────────
+  function stopCamera() {
+    videoStream?.getTracks().forEach(t => t.stop());
+    videoStream = null;
+  }
+
+  // ── 面板纯显示状态（不销毁内容）────────────────────────────────────────
+  function setPanelVisible(visible) {
+    videoActive = Boolean(visible);
+    document.body.classList.toggle("video-mode", videoActive);
+    videoBtn?.classList.toggle("active", videoActive);
+    window.dispatchEvent(new CustomEvent("bailongma:video-mode", {
+      detail: { active: videoActive, kind: videoKind },
+    }));
+  }
+
+  // ── 暂停当前视频 ──────────────────────────────────────────────────────────
+  function pauseCurrentVideo() {
+    if (videoKind === "youtube") {
+      postFrameCommand("pauseVideo");
+    } else if (videoKind === "bilibili") {
+      reloadFrameAutoplay(false);
+    } else if (videoKind === "file") {
+      try { videoFeed?.pause?.(); } catch {}
+    }
+  }
+
+  // ── 恢复当前视频 ──────────────────────────────────────────────────────────
+  function resumeCurrentVideo() {
+    if (videoKind === "youtube") {
+      postFrameCommand("playVideo");
+    } else if (videoKind === "bilibili") {
+      reloadFrameAutoplay(true);
+    } else if (videoKind === "file") {
+      videoFeed?.play?.().catch(() => {});
+    }
+  }
+
+  // ── 清空内容（退出按钮专用）────────────────────────────────────────────
+  function resetVideoSurface() {
+    stopCamera();
+    if (videoFeed) {
+      try { videoFeed.pause(); } catch {}
+      videoFeed.removeAttribute("src");
+      videoFeed.srcObject = null;
+      videoFeed.hidden = true;
+      videoFeed.load?.();
+    }
+    if (videoFrame) {
+      videoFrame.src = "about:blank";
+      videoFrame.hidden = true;
+    }
+    if (videoBackdrop) videoBackdrop.style.backgroundImage = "";
+    videoSurface?.classList.remove("has-media");
+    videoKind = "empty";
+    currentVideoSource = "";
+    currentVideoStart = null;
+  }
+
+  // ── V 键 / 顶栏按钮：暂停+收起 / 继续播放+展开 ────────────────────────
+  function toggleVideoPanelVisibility() {
+    if (videoActive) {
+      pauseCurrentVideo();
+      setPanelVisible(false);
+    } else {
+      if (musicActive) closeMusicPanel();
+      setPanelVisible(true);
+      if (videoKind !== "empty") resumeCurrentVideo();
+    }
+  }
+
+  // ── 退出按钮：完全关闭并销毁 ─────────────────────────────────────────
+  function closeAndDestroyVideo() {
+    setPanelVisible(false);
+    resetVideoSurface();
+  }
+
+  // ── Agent 调用 hide/close 时：同退出按钮 ────────────────────────────────
+  function setVideoModeActive(active) {
+    if (!active) {
+      closeAndDestroyVideo();
+    } else {
+      setPanelVisible(true);
+    }
+  }
+
+  function setBackdrop(kind, url) {
+    if (!videoBackdrop) return;
+    if (kind === "youtube") {
+      const id = extractYoutubeId(url);
+      if (id) {
+        videoBackdrop.style.backgroundImage =
+          `url(https://img.youtube.com/vi/${id}/maxresdefault.jpg)`;
+        return;
+      }
+    }
+    // Bilibili / file / camera：纯色兜底（CSS 已有 #000 背景）
+    videoBackdrop.style.backgroundImage = "";
+  }
+
+  async function showCamera({ title = "Camera", autoplay = true } = {}) {
+    setPanelVisible(true);
+    resetVideoSurface();
+    if (videoTitle) videoTitle.textContent = title;
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      if (videoFeed) {
+        videoFeed.hidden = false;
+        videoFeed.muted = true;
+        videoFeed.srcObject = videoStream;
+        if (autoplay) videoFeed.play?.().catch(() => {});
+      }
+      videoSurface?.classList.add("has-media");
+      videoKind = "camera";
+    } catch (e) {
+      console.warn("摄像头访问失败:", e);
+    }
+  }
+
+  async function showVideo({
+    url = "", title = "Video", autoplay = false,
+    muted = false, volume = null, currentTime = null, camera = false,
+  } = {}) {
+    if (camera) { showCamera({ title, autoplay }); return; }
+
+    const source = normalizeUrl(url);
+    if (musicActive) closeMusicPanel();
+    setPanelVisible(true);
+    resetVideoSurface();
+    currentVideoSource = source;
+    currentVideoStart = Number.isFinite(Number(currentTime)) ? Math.max(0, Number(currentTime)) : null;
+    if (videoTitle) videoTitle.textContent = title || "Video";
+
+    const embedUrl = iframeUrlFor(source, { autoplay, start: currentTime });
+    if (embedUrl && videoFrame) {
+      videoFrame.hidden = false;
+      videoFrame.src = embedUrl;
+      videoSurface?.classList.add("has-media");
+      videoKind = embedUrl.includes("youtube.com") ? "youtube" : "bilibili";
+
+      setBackdrop(videoKind, source);
+      saveMediaHistory({
+        url: source,
+        title,
+        kind: videoKind,
+        videoId: videoKind === "youtube" ? extractYoutubeId(source) : extractBilibiliId(source),
+        platform: videoKind,
+      });
+
+      // 后台验证 YouTube 可访问性，不可用时给控制台警告
+      if (videoKind === "youtube") {
+        validateYoutubeUrl(source).then(ok => {
+          if (ok === false) console.warn("[Media] YouTube 视频可能无法播放（区域限制/私有/已删除）:", source);
+        });
+      }
+      return;
+    }
+
+    if (videoFeed && source) {
+      videoFeed.hidden = false;
+      videoFeed.src = source;
+      videoFeed.muted = Boolean(muted);
+      if (Number.isFinite(Number(volume))) videoFeed.volume = Math.max(0, Math.min(1, Number(volume)));
+      if (Number.isFinite(Number(currentTime))) videoFeed.currentTime = Math.max(0, Number(currentTime));
+      videoSurface?.classList.add("has-media");
+      videoKind = "file";
+      saveMediaHistory({ url: source, title, kind: "file" });
+      if (autoplay) videoFeed.play?.().catch(() => {});
+    }
+  }
+
+  function postFrameCommand(command, args = []) {
+    if (!videoFrame?.contentWindow || videoFrame.hidden) return;
+    if (videoKind === "youtube") {
+      videoFrame.contentWindow.postMessage(JSON.stringify({
+        event: "command",
+        func: command,
+        args,
+      }), "*");
+    }
+  }
+
+  function reloadFrameAutoplay(autoplay) {
+    if (!videoFrame || videoFrame.hidden || !currentVideoSource) return;
+    const nextUrl = iframeUrlFor(currentVideoSource, {
+      autoplay,
+      start: currentVideoStart,
+    });
+    if (nextUrl) videoFrame.src = nextUrl;
+  }
+
+  function controlVideo({ action, volume, currentTime, autoplay } = {}) {
+    const op = action || (autoplay ? "play" : null);
+    if (op === "hide" || op === "close") { closeAndDestroyVideo(); return; }
+    if (op === "play") resumeCurrentVideo();
+    if (op === "pause") pauseCurrentVideo();
+    if (Number.isFinite(Number(volume))) {
+      const v = Math.max(0, Math.min(1, Number(volume)));
+      if (videoFeed) { videoFeed.volume = v; videoFeed.muted = v === 0; }
+      postFrameCommand("setVolume", [Math.round(v * 100)]);
+    }
+    if (Number.isFinite(Number(currentTime))) {
+      const t = Math.max(0, Number(currentTime));
+      currentVideoStart = t;
+      if (videoFeed) videoFeed.currentTime = t;
+      postFrameCommand("seekTo", [t, true]);
+    }
+  }
+
+  function setImageModeActive(active) {
+    imageActive = Boolean(active);
+    document.body.classList.toggle("image-mode", imageActive);
+    if (!imageActive && imageDisplay) {
+      imageDisplay.removeAttribute("src");
+      imageDisplay.alt = "";
+      imageSurface?.classList.remove("has-media");
+    }
+  }
+
+  function showImage({ url = "", title = "Image", alt = "" } = {}) {
+    const source = normalizeUrl(url);
+    setImageModeActive(true);
+    if (imageTitle) imageTitle.textContent = title || "Image";
+    if (imageDisplay && source) {
+      imageDisplay.src = source;
+      imageDisplay.alt = alt || title || "";
+      imageSurface?.classList.add("has-media");
+    }
+  }
+
+  function handleMediaCommand(payload = {}) {
+    const mode   = payload.mode || payload.kind;
+    const action = payload.action || "show";
+    if (mode === "image") {
+      if (action === "hide" || action === "close") setImageModeActive(false);
+      else showImage(payload);
+      return { ok: true, mode: "image", action };
+    }
+    if (mode === "camera") {
+      if (action === "hide" || action === "close") closeAndDestroyVideo();
+      else showCamera(payload);
+      return { ok: true, mode: "camera", action };
+    }
+    if (mode === "video") {
+      if (action === "show" || payload.url || payload.camera) showVideo(payload);
+      else controlVideo(payload);
+      return { ok: true, mode: "video", action };
+    }
+    if (mode === "music") {
+      if (action === "show" || payload.src || payload.playlist) showMusic(payload);
+      else controlMusic(payload);
+      return { ok: true, mode: "music", action };
+    }
+    return { ok: false, error: "unknown media mode" };
+  }
+
+  // ── Music mode ────────────────────────────────────────────────────────────
+  const musicBtn       = document.getElementById("music-btn");
+  const musicExitBtn   = document.getElementById("music-exit-btn");
+  const musicAudio     = document.getElementById("music-audio");
+  const musicPlayBtn   = document.getElementById("music-play");
+  const musicPrevBtn   = document.getElementById("music-prev");
+  const musicNextBtn   = document.getElementById("music-next");
+  const musicSeek      = document.getElementById("music-seek");
+  const musicVolInput  = document.getElementById("music-vol");
+  const musicTimeCur   = document.getElementById("music-time-cur");
+  const musicTimeTotal = document.getElementById("music-time-total");
+  const musicMetaTitle  = document.getElementById("music-meta-title");
+  const musicMetaArtist = document.getElementById("music-meta-artist");
+  const musicCoverEl    = document.getElementById("music-cover");
+  const musicCoverTitle = document.getElementById("music-cover-title");
+  const musicCoverArtist = document.getElementById("music-cover-artist");
+  const musicLyricsScroll = document.getElementById("music-lyrics-scroll");
+  const musicNoLyrics     = document.getElementById("music-no-lyrics");
+
+  let musicActive  = false;
+  let musicPlaying = false;
+  let lrcLines     = [];
+  let playlist     = [];
+  let playlistIdx  = 0;
+  let isSeeking    = false;
+
+  function parseLrc(text) {
+    const lines = [];
+    const re = /\[(\d+):(\d{1,2}(?:\.\d+)?)\](.*)/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const t = parseInt(m[1], 10) * 60 + parseFloat(m[2]);
+      const txt = m[3].trim();
+      if (txt) lines.push({ time: t, text: txt });
+    }
+    return lines.sort((a, b) => a.time - b.time);
+  }
+
+  function fmtTime(s) {
+    if (!isFinite(s) || s < 0) return "0:00";
+    return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  }
+
+  function setMusicPanelVisible(visible) {
+    musicActive = Boolean(visible);
+    document.body.classList.toggle("music-mode", musicActive);
+    musicBtn?.classList.toggle("active", musicActive);
+    window.dispatchEvent(new CustomEvent("bailongma:music-mode", {
+      detail: { active: musicActive },
+    }));
+  }
+
+  function setMusicPlaying(playing) {
+    musicPlaying = Boolean(playing);
+    document.body.classList.toggle("music-playing", musicPlaying);
+    if (musicPlayBtn) musicPlayBtn.textContent = musicPlaying ? "⏸" : "▶";
+    if (musicPlaying) {
+      musicAudio?.play?.().catch(() => {});
+    } else {
+      musicAudio?.pause?.();
+    }
+  }
+
+  function loadLrc(lrcText) {
+    lrcLines = lrcText ? parseLrc(lrcText) : [];
+    if (musicLyricsScroll) {
+      musicLyricsScroll.innerHTML = lrcLines
+        .map((l, i) => `<div class="lrc-line" data-idx="${i}">${l.text}</div>`)
+        .join("");
+    }
+    if (musicNoLyrics) musicNoLyrics.hidden = lrcLines.length > 0;
+  }
+
+  function syncLyrics(currentTime) {
+    if (!lrcLines.length || !musicLyricsScroll) return;
+    let active = -1;
+    for (let i = 0; i < lrcLines.length; i++) {
+      if (lrcLines[i].time <= currentTime + 0.3) active = i;
+      else break;
+    }
+    if (active < 0) return;
+    const lines = musicLyricsScroll.querySelectorAll(".lrc-line");
+    lines.forEach((el, i) => el.classList.toggle("active", i === active));
+    const activeLine = lines[active];
+    if (activeLine) {
+      const pane = document.getElementById("music-lyrics-pane");
+      if (pane) pane.scrollTo({ top: activeLine.offsetTop - pane.clientHeight / 2 + activeLine.clientHeight / 2, behavior: "smooth" });
+    }
+  }
+
+  function loadTrack(index, autoplay = true) {
+    const track = playlist[index];
+    if (!track || !musicAudio) return;
+
+    musicAudio.src = localPathToUrl(track.src || "");
+    musicAudio.volume = parseFloat(musicVolInput?.value ?? "0.8");
+
+    const title  = track.title  || "未知曲目";
+    const artist = track.artist || "";
+    if (musicMetaTitle)  musicMetaTitle.textContent  = title;
+    if (musicMetaArtist) musicMetaArtist.textContent = artist;
+    if (musicCoverTitle)  musicCoverTitle.textContent  = title.slice(0, 14);
+    if (musicCoverArtist) musicCoverArtist.textContent = artist;
+    if (musicTimeCur)   musicTimeCur.textContent   = "0:00";
+    if (musicTimeTotal) musicTimeTotal.textContent = "0:00";
+    if (musicSeek)      { musicSeek.value = "0"; musicSeek.max = "100"; }
+
+    if (track.cover && musicCoverEl) {
+      musicCoverEl.style.backgroundImage = `url(${track.cover})`;
+      musicCoverEl.style.background = "";
+    } else if (musicCoverEl) {
+      musicCoverEl.style.backgroundImage = "";
+      let hash = 0;
+      for (const ch of title) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff;
+      const hue = Math.abs(hash) % 360;
+      musicCoverEl.style.background = `hsl(${hue}, 45%, 32%)`;
+    }
+
+    loadLrc(track.lrc || "");
+    if (autoplay) setMusicPlaying(true);
+  }
+
+  function showMusic({
+    src = "", title = "", artist = "", lrc = "", cover = "",
+    autoplay = true, playlist: pl = null,
+  } = {}) {
+    if (videoActive) closeAndDestroyVideo();
+    setMusicPanelVisible(true);
+    if (pl && pl.length) {
+      playlist = pl;
+    } else {
+      playlist = [{ src, title, artist, lrc, cover }];
+    }
+    playlistIdx = 0;
+    loadTrack(0, autoplay);
+  }
+
+  function closeMusicPanel() {
+    setMusicPlaying(false);
+    setMusicPanelVisible(false);
+    if (musicAudio) musicAudio.src = "";
+    lrcLines = [];
+    if (musicLyricsScroll) musicLyricsScroll.innerHTML = "";
+    if (musicNoLyrics) musicNoLyrics.hidden = false;
+  }
+
+  function controlMusic({ action, volume, currentTime } = {}) {
+    if (action === "hide" || action === "close") { closeMusicPanel(); return; }
+    if (action === "play")  setMusicPlaying(true);
+    if (action === "pause") setMusicPlaying(false);
+    if (Number.isFinite(Number(volume))) {
+      const v = Math.max(0, Math.min(1, Number(volume)));
+      if (musicAudio) musicAudio.volume = v;
+      if (musicVolInput) musicVolInput.value = String(v);
+    }
+    if (Number.isFinite(Number(currentTime)) && musicAudio) {
+      musicAudio.currentTime = Math.max(0, Number(currentTime));
+    }
+  }
+
+  function toggleMusicPanelVisibility() {
+    if (musicActive) {
+      setMusicPlaying(false);
+      setMusicPanelVisible(false);
+    } else if (musicAudio?.src) {
+      if (videoActive) closeAndDestroyVideo();
+      setMusicPanelVisible(true);
+      setMusicPlaying(true);
+    }
+  }
+
+  if (musicAudio) {
+    musicAudio.addEventListener("loadedmetadata", () => {
+      if (musicTimeTotal) musicTimeTotal.textContent = fmtTime(musicAudio.duration);
+      if (musicSeek) musicSeek.max = String(musicAudio.duration || 100);
+    });
+    musicAudio.addEventListener("timeupdate", () => {
+      if (isSeeking) return;
+      const t = musicAudio.currentTime;
+      if (musicTimeCur) musicTimeCur.textContent = fmtTime(t);
+      if (musicSeek && musicAudio.duration) musicSeek.value = String(t);
+      syncLyrics(t);
+    });
+    musicAudio.addEventListener("ended", () => {
+      setMusicPlaying(false);
+      if (playlistIdx < playlist.length - 1) {
+        playlistIdx++;
+        loadTrack(playlistIdx, true);
+      }
+    });
+  }
+
+  musicPlayBtn?.addEventListener("click", () => setMusicPlaying(!musicPlaying));
+  musicPrevBtn?.addEventListener("click", () => {
+    if (playlistIdx > 0) { playlistIdx--; loadTrack(playlistIdx, musicPlaying); }
+    else if (musicAudio) musicAudio.currentTime = 0;
+  });
+  musicNextBtn?.addEventListener("click", () => {
+    if (playlistIdx < playlist.length - 1) { playlistIdx++; loadTrack(playlistIdx, musicPlaying); }
+  });
+  musicVolInput?.addEventListener("input", () => {
+    if (musicAudio) musicAudio.volume = parseFloat(musicVolInput.value);
+  });
+  musicSeek?.addEventListener("mousedown", () => { isSeeking = true; });
+  musicSeek?.addEventListener("input", () => {
+    if (musicTimeCur) musicTimeCur.textContent = fmtTime(parseFloat(musicSeek.value));
+  });
+  musicSeek?.addEventListener("change", () => {
+    if (musicAudio) musicAudio.currentTime = parseFloat(musicSeek.value);
+    isSeeking = false;
+  });
+  musicExitBtn?.addEventListener("click", closeMusicPanel);
+  musicBtn?.addEventListener("click", toggleMusicPanelVisibility);
+
+  window.addEventListener("keydown", (e) => {
+    if (e.target?.tagName === "INPUT" || e.target?.tagName === "TEXTAREA" || e.target?.isContentEditable) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "m" || e.key === "M") {
+      e.preventDefault();
+      toggleMusicPanelVisibility();
+    }
+  });
+
+  window.bailongmaMedia = { handle: handleMediaCommand, showVideo, controlVideo, showImage, showCamera, showMusic, controlMusic };
+  window.addEventListener("bailongma:media", (event) => handleMediaCommand(event.detail || {}));
+
+  // 顶栏按钮：暂停+收起 / 展开+继续（不销毁）
+  videoBtn?.addEventListener("click", toggleVideoPanelVisibility);
+  // 退出按钮：完全关闭
+  videoExitBtn?.addEventListener("click", closeAndDestroyVideo);
+  imageExitBtn?.addEventListener("click", () => setImageModeActive(false));
+
+  // V 键：同顶栏按钮逻辑
+  window.addEventListener("keydown", (e) => {
+    if (e.target?.tagName === "INPUT" || e.target?.tagName === "TEXTAREA" || e.target?.isContentEditable) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "v" || e.key === "V") {
+      e.preventDefault();
+      toggleVideoPanelVisibility();
     }
   });
 })();

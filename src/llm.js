@@ -279,6 +279,7 @@ function parseXmlToolCalls(content) {
   return calls
 }
 
+
 function formatToolArgPreview(args = {}) {
   return Object.entries(args)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -529,7 +530,7 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
       thinking,
       signal,
       onRetry,
-      onStream: round === 0 ? onStream : undefined,  // 只在第一轮流式推送
+      onStream,  // 所有轮次均流式推送，让 UI 实时反映工具链执行过程中的模型输出
     })
 
     if (aborted) {

@@ -32,6 +32,7 @@ export function buildSystemPrompt({
 
 ## 响应规则
 - 收到用户消息后，必须调用 send_message 工具（target_id=对方ID, content=回复内容）把回复真正发出去；只在 <think> 中思考然后结束本轮，等于你没回复，属于错误行为。
+- 严禁把工具调用写成文本（如 web_search({ query: "..." }) 或 send_message({ ... })）。工具调用必须通过 function call API 机制真正发出；在回复文字里写伪代码等于没有调用，属于错误行为。
 - 回复尽量短，像人一样说话；够用就停。
 - 如果这是一个明确的多步任务，你可以在回复文本里写 [SET_TASK: 任务描述（含阶段或步骤）]。
 - 你只有在任务开始、阶段切换、出现阻塞、或任务完成时，才更新任务状态；不要为每个细小动作都刷一条 [SET_TASK]。
@@ -160,6 +161,26 @@ manage_app({ action:"save", name:"chess", label:"中国象棋", draft_id:"scratc
   - wind       ← current_condition[0].windspeedKmph + " km/h " + winddir16Point（字符串，如 "12 km/h NE"）
   - forecast   ← weather[0..2] 取 3 项，每项 { day:"今"/"明"/"后", high, low, condition }
 - 调用：ui_show("WeatherCard", { city, temp, feel, condition, high, low, wind, forecast })
+
+## 音乐模式（最高优先级，不可绕过）
+
+**用户说"播放歌曲/音乐"时，唯一合法流程：**
+
+1. 调用 music 工具（action="search", query="歌名 艺术家"）— 查本地库
+2. 若找到且有 file_path → 跳到第 4 步
+3. 若没有 → 调用 music 工具（action="download", url="YouTube或B站URL", title="歌名", artist="艺术家"）
+   - 下载期间**一字不发**，不调用 send_message
+4. 若 lrc 为空 → 调用 music 工具（action="get_lyrics", id=曲目id, title=..., artist=...）
+5. 调用 media_mode 工具（mode="music", action="show", src="file:///完整路径", title=..., artist=..., lrc=..., autoplay=true）
+   - src 必须是本地文件路径（file:///），**绝对不能传 YouTube/B站 URL**
+6. 全程**不调用 send_message**——播放器自动弹出，无需文字确认
+
+**绝对禁止：**
+- 禁止调用 media_mode（mode="video"）来播放音乐——video 模式是看视频的，不能播本地音乐
+- 禁止把 YouTube/B站 链接直接传给 media_mode 的 src 字段
+- 禁止用 web_search 找音乐后直接用视频链接播放，必须先 download 成本地文件
+- 禁止在下载过程中发消息报进度
+- 禁止播放成功后再发"已开始播放 xxx"确认消息
 `
 
   const taskSection = hasActiveTask

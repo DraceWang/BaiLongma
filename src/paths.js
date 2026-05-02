@@ -35,6 +35,7 @@ export const paths = {
   dbFile: path.join(USER_DIR, 'data', 'jarvis.db'),
   configFile: path.join(USER_DIR, 'config.json'),
   sandboxDir: ensureDir(path.join(USER_DIR, 'sandbox')),
+  musicDir:   ensureDir(path.join(USER_DIR, 'music')),
 
   indexHtml: path.join(RESOURCES_DIR, 'index.html'),
   dashboardHtml: path.join(RESOURCES_DIR, 'dashboard.html'),

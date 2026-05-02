@@ -124,21 +124,38 @@ function applyConfig(provider, apiKey, model) {
 }
 
 export const config = {
-  tickInterval: 10 * 60 * 1000,
+  tickInterval: 20 * 60 * 1000,
   provider: null,
   model: null,
   apiKey: null,
   baseURL: null,
   needsActivation: true,
+  temperature: 0.5,
 }
 
 const stored = readStoredConfig()
 if (stored) {
   applyConfig(stored.provider, stored.apiKey, stored.model)
+  if (typeof stored.temperature === 'number' && stored.temperature >= 0 && stored.temperature <= 2) {
+    config.temperature = stored.temperature
+  }
 } else if (shouldAllowEnvFallback()) {
   const fromEnv = loadFromEnv()
   if (fromEnv) applyConfig(fromEnv.provider, fromEnv.apiKey, fromEnv.model)
 }
+
+// 启动时把 config 文件里的 social 凭证写入 process.env，让各连接器能读到
+;(function loadSocialEnv() {
+  try {
+    const raw = fs.readFileSync(paths.configFile, 'utf-8')
+    const social = JSON.parse(raw)?.social || {}
+    for (const [key, val] of Object.entries(social)) {
+      if (typeof val === 'string' && val && globalThis.process?.env) {
+        globalThis.process.env[key] = val
+      }
+    }
+  } catch {}
+})()
 
 export async function activate({ provider = DEEPSEEK_PROVIDER, apiKey, model }) {
   const p = String(provider || DEEPSEEK_PROVIDER).toLowerCase()
@@ -226,6 +243,16 @@ export function switchModel(model) {
   return { provider: config.provider, model: normalized }
 }
 
+export function setTemperature(t) {
+  const v = Math.min(2, Math.max(0, Number(t) || 0.5))
+  config.temperature = v
+  try {
+    const existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))
+    writeStoredConfig({ ...existing, temperature: v })
+  } catch {}
+  return { temperature: v }
+}
+
 export function getMinimaxKey() {
   try {
     const raw = fs.readFileSync(paths.configFile, 'utf-8')
@@ -244,6 +271,45 @@ export function setMinimaxKey(key) {
     const { minimax_api_key: _removed, ...rest } = existing
     writeStoredConfig(rest)
   }
+}
+
+// ── Social media platform config ──
+
+const SOCIAL_ENV_KEYS = [
+  'DISCORD_BOT_TOKEN',
+  'FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_VERIFICATION_TOKEN',
+  'WECHAT_OFFICIAL_APP_ID', 'WECHAT_OFFICIAL_APP_SECRET', 'WECHAT_OFFICIAL_TOKEN',
+  'WECOM_BOT_KEY', 'WECOM_INCOMING_TOKEN',
+]
+
+export function getSocialConfig() {
+  let stored = {}
+  try { stored = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))?.social || {} } catch {}
+  const result = {}
+  for (const key of SOCIAL_ENV_KEYS) {
+    const val = stored[key] || globalThis.process?.env?.[key] || ''
+    result[key] = { configured: !!val }
+  }
+  return result
+}
+
+export function setSocialConfig(updates) {
+  let existing = {}
+  try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
+  const current = existing.social || {}
+  const next = { ...current }
+  for (const [key, val] of Object.entries(updates)) {
+    if (!SOCIAL_ENV_KEYS.includes(key)) continue
+    const trimmed = String(val || '').trim()
+    if (trimmed) {
+      next[key] = trimmed
+      // 立即生效，无需重启
+      if (globalThis.process?.env) globalThis.process.env[key] = trimmed
+    } else {
+      delete next[key]
+    }
+  }
+  writeStoredConfig({ ...existing, social: next })
 }
 
 export const __internals = {

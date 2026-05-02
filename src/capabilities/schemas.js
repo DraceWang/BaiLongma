@@ -294,6 +294,78 @@ export const TOOL_SCHEMAS = {
     }
   },
 
+  media_mode: {
+    type: 'function',
+    function: {
+      name: 'media_mode',
+      description: `控制 brain-ui 的媒体舞台。video 从右侧打开，image 从左侧打开，music 从右侧弹出唱片机卡片。
+视频 URL 规则（重要，违反会导致黑屏）：
+  - YouTube：必须使用完整 watch URL（https://www.youtube.com/watch?v=xxx）或 youtu.be 短链。只传 videoId 字符串无效。必须是公开可嵌入的视频（非私有、非区域限制、非需登录）。
+  - Bilibili：必须包含 BV 号（https://www.bilibili.com/video/BVxxxxx）。
+  - 直链视频：必须是可直接访问的 .mp4/.webm 等格式 URL，需确认链接有效且允许跨域。
+  - 严禁：不要传推测出来的 URL；不要传无法访问的私有视频；不要传平台分享页但非嵌入页的链接。
+  - 建议：在 search 工具里先找到并确认视频存在后，再调用 media_mode。优先选择官方频道、播放量高的公开视频。
+按 V 键只是暂停并收起面板（内容保留），close/hide action 才真正销毁视频。
+音乐模式规则：
+  - src 传本地文件绝对路径（用 file:// 前缀）或 HTTP 直链音频。播放前先用 list_directory 或 search_files 确认文件存在。
+  - lrc 是可选的 LRC 格式歌词文本（[mm:ss.xx]歌词行），有就传，没有留空即可。
+  - 播放音乐时不需要回复消息，直接调用工具执行即可。
+  - 按 M 键收起/展开面板。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          mode: { type: 'string', enum: ['video', 'camera', 'image', 'music'], description: 'video=右侧视频模式；camera=右侧摄像头视频；image=左侧图片模式；music=右侧唱片机音乐模式' },
+          action: { type: 'string', enum: ['show', 'hide', 'close', 'play', 'pause', 'seek', 'set_volume', 'update'], description: 'show 显示/加载媒体；hide/close 关闭并销毁；play/pause 控制播放；seek 跳转；set_volume 调音量' },
+          url: { type: 'string', description: '媒体 URL（video/image 用）。必须是完整可访问 URL，参见工具描述规则' },
+          src: { type: 'string', description: '音频文件路径（music 模式用）。本地文件用 file:///绝对路径，或 HTTP 直链' },
+          title: { type: 'string', description: '媒体标题，可选' },
+          artist: { type: 'string', description: '艺术家/歌手名（music 模式用），可选' },
+          lrc: { type: 'string', description: 'LRC 格式歌词文本（music 模式用），可选。格式：[mm:ss.xx]歌词行' },
+          cover: { type: 'string', description: '封面图片路径或 URL（music 模式用），可选' },
+          alt: { type: 'string', description: '图片替代说明，可选' },
+          autoplay: { type: 'boolean', description: '是否自动播放，默认 true' },
+          muted: { type: 'boolean', description: '是否静音直链视频，默认 false' },
+          volume: { type: 'number', description: '音量 0-1' },
+          currentTime: { type: 'number', description: '跳转到的秒数' },
+          camera: { type: 'boolean', description: 'mode=video 时显式打开摄像头；默认 false' },
+        },
+        required: ['mode']
+      }
+    }
+  },
+
+  music: {
+    type: 'function',
+    function: {
+      name: 'music',
+      description: `管理和播放本地音乐库。音乐文件存放在 music 目录下。
+支持的操作：
+  - list：列出音乐库所有曲目（含 id、title、artist、file_path）
+  - search：按歌曲名或艺术家名搜索
+  - download：用 yt-dlp 从 YouTube/BiliBili URL 下载为 mp3 并入库。下载后自动尝试获取歌词。
+  - add：把已存在的本地音频文件（mp3/flac/wav/aac）添加到库
+  - scan：扫描 music 目录，把所有音频文件批量入库
+  - get_lyrics：从 lrclib.net 获取 LRC 格式歌词并保存到库（需要 title + artist）
+  - delete：按 id 从库中移除曲目（不删除实际文件）
+播放时：用 media_mode 工具（mode=music，src=文件路径）弹出唱片机。播放前不需要发消息给用户，直接执行即可。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['list', 'search', 'download', 'add', 'scan', 'get_lyrics', 'delete'], description: '操作类型' },
+          query:  { type: 'string', description: 'search 时的搜索词（歌名或艺术家）' },
+          url:    { type: 'string', description: 'download 时的 YouTube/BiliBili URL' },
+          path:   { type: 'string', description: 'add 时的本地音频文件绝对路径' },
+          title:  { type: 'string', description: '曲目名称，add/download/get_lyrics 时可提供' },
+          artist: { type: 'string', description: '艺术家名，add/download/get_lyrics 时可提供' },
+          album:  { type: 'string', description: '专辑名，可选' },
+          id:     { type: 'number', description: 'get_lyrics/delete 时指定曲目 id' },
+          limit:  { type: 'number', description: 'list/search 返回条数上限，默认 50' },
+        },
+        required: ['action']
+      }
+    }
+  },
+
   manage_reminder: {
     type: 'function',
     function: {

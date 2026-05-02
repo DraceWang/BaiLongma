@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import { spawn } from 'child_process'
 import { chromium } from 'playwright'
 import { nowTimestamp } from '../time.js'
-import { searchMemories, searchMemoriesByKeywords, insertMemory, upsertMemoryByMemId, normalizeConversationPartyId, createReminder, findMergeableOneOffReminder, appendReminderTask, listPendingReminders, getReminderById, cancelReminder, upsertPrefetchTask, removePrefetchTask, listPrefetchTasks, insertActionLog } from '../db.js'
+import { searchMemories, searchMemoriesByKeywords, insertMemory, upsertMemoryByMemId, normalizeConversationPartyId, createReminder, findMergeableOneOffReminder, appendReminderTask, listPendingReminders, getReminderById, cancelReminder, upsertPrefetchTask, removePrefetchTask, listPrefetchTasks, insertActionLog, upsertMusicTrack, getMusicTrack, searchMusicLibrary, listMusicLibrary, updateMusicLrc, deleteMusicTrack as dbDeleteMusicTrack } from '../db.js'
 import { emitEvent, emitUICommand, emitACUIEvent, hasACUIClient, addActiveUICard, removeActiveUICard } from '../events.js'
 import { dispatchSocialMessage } from '../social/dispatch.js'
 import { callCapability, listCapabilities } from '../providers/registry.js'
@@ -138,6 +138,8 @@ const TOOL_RISK = {
   ui_patch: 'medium',
   manage_app: 'medium',
   set_tick_interval: 'medium',
+  media_mode: 'low',
+  music: 'low',
   delete_file: 'high',
   exec_command: 'high',
   kill_process: 'high',
@@ -324,6 +326,10 @@ async function executeToolUnchecked(name, args, context = {}) {
         return await execGenerateImage(args)
       case 'set_tick_interval':
         return execSetTickInterval(args)
+      case 'media_mode':
+        return execMediaMode(args)
+      case 'music':
+        return await execMusic(args)
       case 'schedule_reminder':
       case 'manage_reminder':
         return await execManageReminder(args, context)
@@ -1572,6 +1578,232 @@ function execSetTickInterval({ seconds, ttl, reason }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ACUI · UI 控制工具
 // ─────────────────────────────────────────────────────────────────────────────
+function execMediaMode(args = {}) {
+  const mode = String(args.mode || args.kind || '').trim()
+  const action = String(args.action || 'show').trim()
+  if (!['video', 'camera', 'image', 'music'].includes(mode)) {
+    return JSON.stringify({ ok: false, tool: 'media_mode', error: 'mode must be video, camera, image, or music' })
+  }
+  if (!['show', 'hide', 'close', 'play', 'pause', 'seek', 'set_volume', 'update'].includes(action)) {
+    return JSON.stringify({ ok: false, tool: 'media_mode', error: 'unsupported action' })
+  }
+
+  const payload = {
+    mode,
+    action,
+    url: typeof args.url === 'string' ? args.url : undefined,
+    src: typeof args.src === 'string' ? args.src : undefined,
+    title: typeof args.title === 'string' ? args.title : undefined,
+    artist: typeof args.artist === 'string' ? args.artist : undefined,
+    lrc: typeof args.lrc === 'string' ? args.lrc : undefined,
+    cover: typeof args.cover === 'string' ? args.cover : undefined,
+    alt: typeof args.alt === 'string' ? args.alt : undefined,
+    autoplay: typeof args.autoplay === 'boolean' ? args.autoplay : (mode === 'music' ? true : undefined),
+    muted: typeof args.muted === 'boolean' ? args.muted : undefined,
+    camera: mode === 'camera' || args.camera === true,
+  }
+
+  if (Number.isFinite(Number(args.volume))) {
+    payload.volume = Math.max(0, Math.min(1, Number(args.volume)))
+  }
+  if (Number.isFinite(Number(args.currentTime ?? args.time ?? args.seek))) {
+    payload.currentTime = Math.max(0, Number(args.currentTime ?? args.time ?? args.seek))
+  }
+
+  emitEvent('media_mode', payload)
+  emitEvent('action', { tool: 'media_mode', summary: `${mode}:${action}`, detail: payload.title || payload.url || '' })
+  return JSON.stringify({ ok: true, tool: 'media_mode', ...payload })
+}
+
+// ── Music Library ─────────────────────────────────────────────────────────────
+
+const MUSIC_AUDIO_EXTS = new Set(['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.opus'])
+
+async function fetchLrcFromNet(title, artist) {
+  try {
+    const params = new URLSearchParams({ track_name: title })
+    if (artist) params.set('artist_name', artist)
+    const res = await fetch(`https://lrclib.net/api/get?${params}`, {
+      signal: AbortSignal.timeout(8000),
+      headers: { 'User-Agent': 'BaiLongma/1.0' },
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.syncedLyrics || data.plainLyrics || null
+  } catch {
+    return null
+  }
+}
+
+function runCommand(cmd, cwd) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, { shell: true, cwd: cwd || paths.musicDir })
+    let stdout = '', stderr = ''
+    child.stdout.on('data', d => { stdout += d.toString() })
+    child.stderr.on('data', d => { stderr += d.toString() })
+    child.on('close', code => resolve({ code, stdout, stderr }))
+    child.on('error', err => resolve({ code: -1, stdout, stderr: err.message }))
+  })
+}
+
+const YTDLP_LOCAL = path.join(paths.musicDir, 'yt-dlp.exe')
+const YTDLP_URL   = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+
+async function resolveYtDlp() {
+  // 1. 系统 PATH 里有就直接用
+  const sys = await runCommand('yt-dlp --version', paths.musicDir)
+  if (sys.code === 0) return 'yt-dlp'
+
+  // 2. music 目录里有本地副本就用它
+  if (fs.existsSync(YTDLP_LOCAL)) {
+    const local = await runCommand(`"${YTDLP_LOCAL}" --version`, paths.musicDir)
+    if (local.code === 0) return `"${YTDLP_LOCAL}"`
+  }
+
+  // 3. 自动下载 yt-dlp.exe 到 music 目录
+  emitEvent('action', { tool: 'music', summary: 'yt-dlp 未安装，正在自动下载…', detail: YTDLP_URL })
+  const res = await fetch(YTDLP_URL, { signal: AbortSignal.timeout(60000) })
+  if (!res.ok) return null
+  const buf = Buffer.from(await res.arrayBuffer())
+  fs.writeFileSync(YTDLP_LOCAL, buf)
+  fs.chmodSync(YTDLP_LOCAL, 0o755)
+  return `"${YTDLP_LOCAL}"`
+}
+
+async function execMusic(args = {}) {
+  const action = String(args.action || 'list').trim()
+  const musicDir = paths.musicDir
+
+  // ── list ──────────────────────────────────────────────────────────────────
+  if (action === 'list') {
+    const rows = listMusicLibrary(Number(args.limit) || 50)
+    return JSON.stringify({ ok: true, count: rows.length, tracks: rows })
+  }
+
+  // ── search ────────────────────────────────────────────────────────────────
+  if (action === 'search') {
+    const q = String(args.query || '').trim()
+    if (!q) return JSON.stringify({ ok: false, error: 'query required' })
+    const rows = searchMusicLibrary(q, Number(args.limit) || 20)
+    return JSON.stringify({ ok: true, count: rows.length, tracks: rows })
+  }
+
+  // ── scan ──────────────────────────────────────────────────────────────────
+  if (action === 'scan') {
+    const entries = fs.readdirSync(musicDir, { withFileTypes: true })
+    const added = []
+    for (const entry of entries) {
+      if (!entry.isFile()) continue
+      const ext = path.extname(entry.name).toLowerCase()
+      if (!MUSIC_AUDIO_EXTS.has(ext)) continue
+      const filePath = path.join(musicDir, entry.name)
+      const baseName = path.basename(entry.name, ext)
+      const track = upsertMusicTrack({ title: baseName, filePath })
+      added.push({ id: track.id, title: track.title, file_path: track.file_path })
+    }
+    return JSON.stringify({ ok: true, scanned: added.length, tracks: added })
+  }
+
+  // ── add ───────────────────────────────────────────────────────────────────
+  if (action === 'add') {
+    const filePath = String(args.path || '').trim()
+    if (!filePath) return JSON.stringify({ ok: false, error: 'path required' })
+    if (!fs.existsSync(filePath)) return JSON.stringify({ ok: false, error: `file not found: ${filePath}` })
+    const ext = path.extname(filePath).toLowerCase()
+    if (!MUSIC_AUDIO_EXTS.has(ext)) return JSON.stringify({ ok: false, error: `unsupported format: ${ext}` })
+    const baseName = path.basename(filePath, ext)
+    const track = upsertMusicTrack({
+      title: String(args.title || baseName),
+      artist: String(args.artist || ''),
+      album: String(args.album || ''),
+      filePath,
+    })
+    return JSON.stringify({ ok: true, track })
+  }
+
+  // ── download ──────────────────────────────────────────────────────────────
+  if (action === 'download') {
+    const url = String(args.url || '').trim()
+    if (!url) return JSON.stringify({ ok: false, error: 'url required' })
+
+    // 自动解析 yt-dlp 路径（没有则自动下载）
+    const ytdlp = await resolveYtDlp()
+    if (!ytdlp) return JSON.stringify({ ok: false, error: 'yt-dlp 自动下载失败，请检查网络连接' })
+
+    // Download: print final filepath after conversion
+    const outTemplate = path.join(musicDir, '%(title)s.%(ext)s').replace(/\\/g, '/')
+    const dlCmd = `${ytdlp} -x --audio-format mp3 --audio-quality 192K --no-playlist --print after_move:filepath -o "${outTemplate}" "${url}"`
+    const result = await runCommand(dlCmd)
+
+    if (result.code !== 0) {
+      return JSON.stringify({ ok: false, error: `yt-dlp failed: ${result.stderr.slice(0, 400)}` })
+    }
+
+    // Parse output filepath (last non-empty line)
+    const lines = result.stdout.trim().split('\n').map(l => l.trim()).filter(Boolean)
+    let filePath = lines[lines.length - 1] || ''
+
+    // Fallback: scan for newest mp3 in musicDir
+    if (!filePath || !fs.existsSync(filePath)) {
+      const files = fs.readdirSync(musicDir)
+        .filter(f => f.endsWith('.mp3'))
+        .map(f => ({ f, mt: fs.statSync(path.join(musicDir, f)).mtimeMs }))
+        .sort((a, b) => b.mt - a.mt)
+      if (files.length) filePath = path.join(musicDir, files[0].f)
+    }
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      return JSON.stringify({ ok: false, error: 'Download completed but could not locate output file' })
+    }
+
+    const baseName = path.basename(filePath, '.mp3')
+    const title  = String(args.title  || baseName)
+    const artist = String(args.artist || '')
+
+    // Auto-fetch lyrics
+    let lrc = ''
+    if (title) {
+      lrc = await fetchLrcFromNet(title, artist) || ''
+    }
+
+    const track = upsertMusicTrack({ title, artist, album: String(args.album || ''), filePath, lrc, sourceUrl: url })
+    return JSON.stringify({ ok: true, track, lrc_fetched: Boolean(lrc) })
+  }
+
+  // ── get_lyrics ────────────────────────────────────────────────────────────
+  if (action === 'get_lyrics') {
+    const id = Number(args.id)
+    let title  = String(args.title  || '').trim()
+    let artist = String(args.artist || '').trim()
+
+    if (id) {
+      const track = getMusicTrack(id)
+      if (!track) return JSON.stringify({ ok: false, error: `track id=${id} not found` })
+      if (!title)  title  = track.title
+      if (!artist) artist = track.artist
+    }
+    if (!title) return JSON.stringify({ ok: false, error: 'title required' })
+
+    const lrc = await fetchLrcFromNet(title, artist)
+    if (!lrc) return JSON.stringify({ ok: false, error: `lyrics not found for "${title}" on lrclib.net` })
+
+    if (id) updateMusicLrc(id, lrc)
+    return JSON.stringify({ ok: true, id: id || null, title, artist, lrc_length: lrc.length, lrc })
+  }
+
+  // ── delete ────────────────────────────────────────────────────────────────
+  if (action === 'delete') {
+    const id = Number(args.id)
+    if (!id) return JSON.stringify({ ok: false, error: 'id required' })
+    const track = getMusicTrack(id)
+    if (!track) return JSON.stringify({ ok: false, error: `track id=${id} not found` })
+    dbDeleteMusicTrack(id)
+    return JSON.stringify({ ok: true, deleted: { id, title: track.title } })
+  }
+
+  return JSON.stringify({ ok: false, error: `unknown action: ${action}` })
+}
+
 const ACUI_COMPONENTS_PATH = path.resolve(__dirname, 'ui-components.json')
 const ACUI_REGISTRY_PATH   = path.resolve(__dirname, '..', 'ui', 'brain-ui', 'acui', 'registry.js')
 const ACUI_COMPONENTS_DIR  = path.resolve(__dirname, '..', 'ui', 'brain-ui', 'acui', 'components')

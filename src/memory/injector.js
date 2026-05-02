@@ -202,7 +202,7 @@ export async function runInjector({ message, state, hint = '' }) {
   const baseTools = [
     'send_message', 'web_search', 'fetch_url', 'browser_read', 'list_dir', 'read_file', 'write_file',
     'delete_file', 'make_dir', 'exec_command', 'kill_process', 'list_processes',
-    'set_tick_interval', 'manage_reminder', 'manage_prefetch_task',
+    'set_tick_interval', 'media_mode', 'manage_reminder', 'manage_prefetch_task',
   ]
   const { listCapabilities } = await import('../providers/registry.js')
   const mmCaps = listCapabilities()

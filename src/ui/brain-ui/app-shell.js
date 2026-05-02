@@ -11,6 +11,9 @@ const createPrimaryPanel = () => `
       <div class="eyebrow">Cognitive Surface</div>
       <div class="brand-title" id="agent-brand-name">Longma AI Agent</div>
     </div>
+    <button class="voice-btn" id="voice-btn" title="麦克风 开/关" type="button">🎤</button>
+    <button class="video-btn" id="video-btn" title="视频模式 (V)" type="button">⊞</button>
+    <button class="music-btn" id="music-btn" title="音乐模式 (M)" type="button">♪</button>
     <button class="settings-btn" id="settings-btn" title="设置" type="button">⚙</button>
   </header>
 
@@ -21,6 +24,8 @@ const createPrimaryPanel = () => `
     </div>
     <span class="pill" id="pill-l1">LIVE</span>
   </div>
+
+  ${createVoicePanel()}
 
   <div class="legend" id="legend"></div>
 
@@ -145,55 +150,282 @@ const createSettingsModal = () => `
       <span class="settings-title">设置</span>
       <button class="settings-close" id="settings-close" type="button" aria-label="关闭">×</button>
     </div>
+    <div class="settings-body">
 
-    <section class="settings-section">
-      <div class="settings-section-label">当前配置</div>
-      <div class="settings-config-row">
-        <span class="settings-config-type">LLM</span>
-        <span class="settings-config-info" id="settings-cfg-llm">—</span>
-        <span class="settings-config-dot" id="settings-cfg-llm-dot"></span>
-      </div>
-      <div class="settings-config-row">
-        <span class="settings-config-type">媒体</span>
-        <span class="settings-config-info" id="settings-cfg-media">—</span>
-        <span class="settings-config-dot" id="settings-cfg-media-dot"></span>
-      </div>
-    </section>
+      <!-- 侧栏导航 -->
+      <nav class="settings-nav">
+        <button class="settings-nav-item active" data-tab="appearance" type="button">外观</button>
+        <button class="settings-nav-item" data-tab="llm" type="button">LLM 模型</button>
+        <button class="settings-nav-item" data-tab="media" type="button">媒体能力</button>
+        <button class="settings-nav-item" data-tab="social" type="button">社交媒体</button>
+        <button class="settings-nav-item" data-tab="voice" type="button">语音</button>
+      </nav>
 
-    <section class="settings-section">
-      <div class="settings-section-label" id="settings-llm-section-label">LLM 配置</div>
-      <div class="settings-row">
-        <label class="settings-label" for="settings-provider-select">提供商</label>
-        <select class="settings-select" id="settings-provider-select">
-          <option value="deepseek">DeepSeek</option>
-          <option value="minimax">MiniMax</option>
-        </select>
-      </div>
-      <div class="settings-row">
-        <label class="settings-label" for="settings-model-select">切换模型</label>
-        <select class="settings-select" id="settings-model-select"></select>
-      </div>
-      <div class="settings-row">
-        <label class="settings-label" for="settings-llm-key">API Key</label>
-        <input class="settings-input" id="settings-llm-key" type="password" placeholder="留空则仅切换模型…" autocomplete="new-password">
-      </div>
-      <div class="settings-row-action">
-        <button class="settings-save-btn" id="settings-save-llm" type="button">保存</button>
-        <span class="settings-feedback" id="settings-llm-feedback"></span>
-      </div>
-    </section>
+      <!-- 内容区 -->
+      <div class="settings-content">
 
-    <section class="settings-section">
-      <div class="settings-section-label">MiniMax 媒体能力</div>
-      <div class="settings-row">
-        <label class="settings-label" for="settings-minimax-key">API Key</label>
-        <input class="settings-input" id="settings-minimax-key" type="password" placeholder="填入 MiniMax API Key…" autocomplete="new-password">
+        <!-- ── 外观 tab ── -->
+        <div class="settings-tab active" data-tab="appearance">
+          <div class="settings-section">
+            <div class="settings-section-label">主题</div>
+            ${createThemeSwitcher()}
+          </div>
+        </div>
+
+        <!-- ── LLM 模型 tab ── -->
+        <div class="settings-tab" data-tab="llm">
+          <div class="settings-section">
+            <div class="settings-section-label">当前状态</div>
+            <div class="settings-config-row">
+              <span class="settings-config-type">LLM</span>
+              <span class="settings-config-info" id="settings-cfg-llm">—</span>
+              <span class="settings-config-dot" id="settings-cfg-llm-dot"></span>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">切换配置</div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-provider-select">提供商</label>
+              <select class="settings-select" id="settings-provider-select">
+                <option value="deepseek">DeepSeek</option>
+                <option value="minimax">MiniMax</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-model-select">模型</label>
+              <select class="settings-select" id="settings-model-select"></select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-llm-key">API Key</label>
+              <input class="settings-input" id="settings-llm-key" type="password" placeholder="留空则仅切换模型…" autocomplete="new-password">
+            </div>
+            <div class="settings-row-action">
+              <button class="settings-save-btn" id="settings-save-llm" type="button">保存</button>
+              <span class="settings-feedback" id="settings-llm-feedback"></span>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">模型温度</div>
+            <p class="settings-hint">控制回复的随机性。0 = 确定性最高，1 = 正常创意，1.5 = 更随机。推荐 0.3–0.7。</p>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-temperature">Temperature</label>
+              <input type="range" id="settings-temperature" min="0" max="1.5" step="0.05" value="0.5" style="flex:1;cursor:pointer;">
+              <span id="settings-temperature-val" style="min-width:2.8em;text-align:right;color:var(--ink2);font-size:13px;">0.50</span>
+            </div>
+            <div class="settings-row-action">
+              <button class="settings-save-btn" id="settings-save-temperature" type="button">保存</button>
+              <span class="settings-feedback" id="settings-temperature-feedback"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 媒体能力 tab ── -->
+        <div class="settings-tab" data-tab="media">
+          <div class="settings-section">
+            <div class="settings-section-label">当前状态</div>
+            <div class="settings-config-row">
+              <span class="settings-config-type">媒体</span>
+              <span class="settings-config-info" id="settings-cfg-media">—</span>
+              <span class="settings-config-dot" id="settings-cfg-media-dot"></span>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">MiniMax API Key</div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-minimax-key">API Key</label>
+              <input class="settings-input" id="settings-minimax-key" type="password" placeholder="填入 MiniMax API Key…" autocomplete="new-password">
+            </div>
+            <div class="settings-row-action">
+              <button class="settings-save-btn" id="settings-save-minimax" type="button">保存</button>
+              <span class="settings-feedback" id="settings-minimax-feedback"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 社交媒体 tab ── -->
+        <div class="settings-tab" data-tab="social">
+          <div class="settings-section">
+            <div class="settings-section-label">Discord</div>
+            <div class="settings-platform-status" id="social-status-discord"></div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-discord-token">Bot Token</label>
+              <input class="settings-input" id="social-discord-token" type="password" placeholder="留空保持原值不变…" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">飞书</div>
+            <div class="settings-platform-status" id="social-status-feishu"></div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-feishu-appid">App ID</label>
+              <input class="settings-input" id="social-feishu-appid" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-feishu-secret">App Secret</label>
+              <input class="settings-input" id="social-feishu-secret" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-feishu-token">Verify Token</label>
+              <input class="settings-input" id="social-feishu-token" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">微信公众号</div>
+            <div class="settings-platform-status" id="social-status-wechat"></div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-wechat-appid">App ID</label>
+              <input class="settings-input" id="social-wechat-appid" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-wechat-secret">App Secret</label>
+              <input class="settings-input" id="social-wechat-secret" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-wechat-token">Token</label>
+              <input class="settings-input" id="social-wechat-token" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">企业微信</div>
+            <div class="settings-platform-status" id="social-status-wecom"></div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-wecom-botkey">Bot Key</label>
+              <input class="settings-input" id="social-wecom-botkey" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="social-wecom-token">Incoming Token</label>
+              <input class="settings-input" id="social-wecom-token" type="password" placeholder="留空保持原值…" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="settings-section settings-section-action">
+            <button class="settings-save-btn" id="settings-save-social" type="button">保存所有</button>
+            <span class="settings-feedback" id="settings-social-feedback"></span>
+          </div>
+        </div>
+
+        <!-- ── 语音 tab ── -->
+        <div class="settings-tab" data-tab="voice">
+          <div class="settings-section">
+            <div class="settings-section-label">语音输入</div>
+            <p class="settings-hint">点击下方麦克风按钮后，识别结果自动填入对话框并发送。</p>
+            <div class="settings-row">
+              <label class="settings-label" for="voice-lang-select">识别语言</label>
+              <select class="settings-select" id="voice-lang-select">
+                <option value="zh-CN">中文（普通话）</option>
+                <option value="zh-TW">中文（繁体）</option>
+                <option value="en-US">English (US)</option>
+                <option value="ja-JP">日本語</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="voice-auto-send">识别后自动发送</label>
+              <input id="voice-auto-send" type="checkbox" checked style="width:auto;flex:none;">
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">语音灵敏度</div>
+            <p class="settings-hint">调节麦克风触发阈值。越低越灵敏，越高越需要大声说话。默认 0.008。</p>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-voice-threshold">触发阈值</label>
+              <input type="range" id="settings-voice-threshold" min="0.002" max="0.04" step="0.001" value="0.008" style="flex:1;cursor:pointer;">
+              <span id="settings-voice-threshold-val" style="min-width:3.5em;text-align:right;color:var(--ink2);font-size:13px;">0.008</span>
+            </div>
+          </div>
+          <div class="settings-section settings-section-action">
+            <button class="settings-save-btn" id="settings-save-voice" type="button">保存</button>
+            <span class="settings-feedback" id="settings-voice-feedback"></span>
+          </div>
+        </div>
+
+      </div><!-- /settings-content -->
+    </div><!-- /settings-body -->
+  </div>
+</div>
+`;
+
+const createVoicePanel = () => `
+<div class="voice-panel" id="voice-panel">
+  <canvas id="voice-canvas" width="160" height="160"></canvas>
+  <div class="voice-transcript" id="voice-transcript"></div>
+</div>
+`;
+
+const createVideoPanel = () => `
+<div class="video-panel" id="video-panel">
+  <div class="media-stage-head">
+    <div class="media-stage-title" id="video-title">Video</div>
+    <button class="video-exit-btn" id="video-exit-btn" type="button" title="Exit video">x</button>
+  </div>
+  <div class="video-surface" id="video-surface">
+    <div class="video-backdrop" id="video-backdrop"></div>
+    <video id="video-feed" playsinline controls></video>
+    <iframe id="video-frame" title="Video player" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen hidden></iframe>
+    <div class="video-empty" id="video-empty">No video source</div>
+  </div>
+</div>
+`;
+
+const createMusicPanel = () => `
+<div class="music-panel" id="music-panel">
+  <div class="media-stage-head">
+    <div class="media-stage-title" id="music-panel-title">Music</div>
+    <button class="music-exit-btn" id="music-exit-btn" type="button" title="退出音乐模式">×</button>
+  </div>
+  <div class="music-stage">
+    <div class="music-turntable">
+      <div class="music-vinyl" id="music-vinyl">
+        <div class="music-groove music-groove-1"></div>
+        <div class="music-groove music-groove-2"></div>
+        <div class="music-groove music-groove-3"></div>
+        <div class="music-groove music-groove-4"></div>
+        <div class="music-cover" id="music-cover">
+          <div class="music-cover-title" id="music-cover-title">♪</div>
+          <div class="music-cover-artist" id="music-cover-artist"></div>
+        </div>
+        <div class="music-spindle"></div>
       </div>
-      <div class="settings-row-action">
-        <button class="settings-save-btn" id="settings-save-minimax" type="button">保存</button>
-        <span class="settings-feedback" id="settings-minimax-feedback"></span>
+      <div class="music-tonearm-group" id="music-tonearm-group">
+        <div class="music-tonearm-pivot"></div>
+        <div class="music-arm-shaft"></div>
+        <div class="music-headshell">
+          <div class="music-stylus"></div>
+        </div>
       </div>
-    </section>
+    </div>
+    <div class="music-lyrics-pane" id="music-lyrics-pane">
+      <div class="music-lyrics-scroll" id="music-lyrics-scroll"></div>
+      <div class="music-no-lyrics" id="music-no-lyrics" hidden>— 无歌词 —</div>
+    </div>
+  </div>
+  <div class="music-footer">
+    <div class="music-meta">
+      <div class="music-meta-title" id="music-meta-title">—</div>
+      <div class="music-meta-artist" id="music-meta-artist">—</div>
+    </div>
+    <div class="music-progress-row">
+      <span class="music-time" id="music-time-cur">0:00</span>
+      <input class="music-seek" id="music-seek" type="range" min="0" max="100" step="0.1" value="0">
+      <span class="music-time" id="music-time-total">0:00</span>
+    </div>
+    <div class="music-controls-row">
+      <button class="music-ctrl" id="music-prev" type="button" title="上一首">⏮</button>
+      <button class="music-ctrl music-ctrl-play" id="music-play" type="button" title="播放/暂停">▶</button>
+      <button class="music-ctrl" id="music-next" type="button" title="下一首">⏭</button>
+      <input class="music-vol" id="music-vol" type="range" min="0" max="1" step="0.01" value="0.8" title="音量">
+    </div>
+  </div>
+  <audio id="music-audio" preload="auto"></audio>
+</div>
+`;
+
+const createImagePanel = () => `
+<div class="image-panel" id="image-panel">
+  <div class="media-stage-head">
+    <div class="media-stage-title" id="image-title">Image</div>
+    <button class="image-exit-btn" id="image-exit-btn" type="button" title="Close image">x</button>
+  </div>
+  <div class="image-surface" id="image-surface">
+    <img id="image-display" alt="" />
+    <div class="image-empty" id="image-empty">No image source</div>
   </div>
 </div>
 `;
@@ -209,9 +441,11 @@ export function createBrainUiMarkup() {
     createPrimaryPanel(),
     createSecondaryPanel(),
     createConsole(),
-    createThemeSwitcher(),
     createTooltip(),
     createSettingsModal(),
+    createVideoPanel(),
+    createMusicPanel(),
+    createImagePanel(),
     createPanelTabs(),
   ].join("\n\n");
 }

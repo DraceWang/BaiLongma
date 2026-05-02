@@ -20,6 +20,7 @@ import { seedSandboxOnce } from './paths.js'
 import { ensureSkillMemories } from './memory/seed-skills.js'
 import { dispatchSocialMessage } from './social/dispatch.js'
 import { startSocialConnectors } from './social/index.js'
+import { startVoiceServer, stopVoiceServer } from './voice/manager.js'
 
 // 首次启动时把资源目录里的 sandbox 种子文件拷到用户数据目录（Electron 安装场景）
 seedSandboxOnce()
@@ -360,7 +361,7 @@ async function process(input, label, msg = null) {
 
     const directions = [...(injection.directions || [])]
     if (fastUserPath) {
-      directions.unshift('当前是外部用户的实时消息。优先尽快理解并通过 send_message 直接回应，不要先做耗时工具调用或深度上下文采集；只有在回复离不开时才调用较重工具。')
+      directions.unshift('当前是外部用户的实时消息。优先尽快理解并通过 send_message 直接回应，不要先做耗时工具调用或深度上下文采集；只有在回复离不开时才调用较重工具。执行过程中，有值得说的进展或发现时随时 send_message 同步——不需要事先请示，能做的直接做，做的过程中有话说就说。')
     }
 
     const memoriesText = formatMemoriesForPrompt(injection.memories, injection.recallMemories)
@@ -471,6 +472,7 @@ async function process(input, label, msg = null) {
       messages: llmMessages,
       tools: injection.tools || ['send_message'],
       maxTokens: undefined,
+      temperature: config.temperature,
       signal: controller.signal,
       toolContext,
       mustReply: !!msg?.fromId,
@@ -855,6 +857,15 @@ async function main() {
     },
   })
   startSocialConnectors({ pushMessage, emitEvent }).catch(err => console.warn('[social] startup failed:', err.message))
+
+  // 自动启动语音服务（turbo 模型 = large-v3-turbo，~809MB，首次运行自动下载）
+  // 用 try-catch 隔离，确保语音服务失败不影响主程序
+  try {
+    startVoiceServer({ model: 'turbo' })
+    process.on('exit', () => { try { stopVoiceServer() } catch {} })
+  } catch (err) {
+    console.warn('[Voice] 语音服务启动失败（不影响主程序）:', err.message)
+  }
 
   // 启动 TUI
   startTUI('ID:000001')

@@ -1,12 +1,12 @@
-﻿import crypto from 'crypto'
+import crypto from 'crypto'
 import { pushMessage } from '../queue.js'
 import { emitEvent } from '../events.js'
 import { jsonResponse, readBody, textResponse } from './http.js'
 import { escapeXml, parseSimpleXml } from './xml.js'
+import { env } from './utils.js'
 
-function env(name) {
-  return String(globalThis.process?.env?.[name] || '').trim()
-}
+// 微信消息防重放：5 分钟时间窗口
+const WECHAT_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000
 
 export function isSocialWebhookPath(pathname) {
   return pathname.startsWith('/social/')
@@ -22,6 +22,12 @@ function verifyWechatSignature(url) {
   const signature = url.searchParams.get('signature') || ''
   const timestamp = url.searchParams.get('timestamp') || ''
   const nonce = url.searchParams.get('nonce') || ''
+  if (!signature || !timestamp || !nonce) return false
+
+  // 时间窗口校验：拒绝超过 5 分钟的请求（防重放）
+  const tsMs = Number(timestamp) * 1000
+  if (Math.abs(Date.now() - tsMs) > WECHAT_TIMESTAMP_TOLERANCE_MS) return false
+
   return sha1([token, timestamp, nonce]) === signature
 }
 
@@ -33,17 +39,25 @@ function enqueueSocialMessage(fromId, content, channel, social = {}) {
 }
 
 async function handleFeishu(req, res) {
+  // 鉴权前置：未配置 token 时直接拒绝，而不是跳过验证
+  const expectedToken = env('FEISHU_VERIFICATION_TOKEN')
+  if (!expectedToken) return jsonResponse(res, 503, { ok: false, error: 'FEISHU_VERIFICATION_TOKEN not configured' })
+
   const raw = await readBody(req)
   let body = null
   try { body = JSON.parse(raw.toString('utf-8') || '{}') } catch {
     return jsonResponse(res, 400, { ok: false, error: 'invalid json' })
   }
 
-  if (body.challenge) return jsonResponse(res, 200, { challenge: body.challenge })
+  // challenge 握手在鉴权之前响应（飞书要求）
+  if (body.challenge) {
+    if (body.token !== expectedToken) return jsonResponse(res, 403, { ok: false, error: 'invalid token' })
+    return jsonResponse(res, 200, { challenge: body.challenge })
+  }
+
   if (body.encrypt) return jsonResponse(res, 400, { ok: false, error: 'encrypted Feishu events are not enabled in Bailongma yet' })
 
-  const expectedToken = env('FEISHU_VERIFICATION_TOKEN')
-  if (expectedToken && body.token && body.token !== expectedToken) {
+  if (body.token !== expectedToken) {
     return jsonResponse(res, 403, { ok: false, error: 'invalid token' })
   }
 
@@ -68,6 +82,8 @@ async function handleFeishu(req, res) {
 }
 
 async function handleWechatOfficial(req, res, url) {
+  // WECHAT_OFFICIAL_TOKEN 未配置时拒绝所有请求
+  if (!env('WECHAT_OFFICIAL_TOKEN')) return textResponse(res, 503, 'WECHAT_OFFICIAL_TOKEN not configured')
   if (!verifyWechatSignature(url)) return textResponse(res, 403, 'forbidden')
   if (req.method === 'GET') return textResponse(res, 200, url.searchParams.get('echostr') || '')
 
@@ -84,9 +100,13 @@ async function handleWechatOfficial(req, res, url) {
 }
 
 async function handleWeCom(req, res) {
-  const expectedToken = env('WECOM_INCOMING_TOKEN') || env('SOCIAL_WEBHOOK_TOKEN')
-  const providedToken = req.headers['x-bailongma-token'] || req.headers.authorization?.replace(/^Bearer\s+/i, '')
-  if (expectedToken && providedToken !== expectedToken) {
+  // 鉴权前置：未配置 token 时拒绝
+  const expectedToken = env('WECOM_INCOMING_TOKEN')
+  if (!expectedToken) return jsonResponse(res, 503, { ok: false, error: 'WECOM_INCOMING_TOKEN not configured' })
+
+  // 统一只从 Authorization: Bearer <token> 读取
+  const providedToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || ''
+  if (providedToken !== expectedToken) {
     return jsonResponse(res, 403, { ok: false, error: 'invalid token' })
   }
 
@@ -111,5 +131,3 @@ export async function handleSocialWebhook(req, res, url) {
     return jsonResponse(res, 500, { ok: false, error: error.message })
   }
 }
-
-

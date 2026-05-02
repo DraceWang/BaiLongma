@@ -1,14 +1,13 @@
 import { requestJson } from './http.js'
 import { parseSocialTarget } from './targets.js'
+import { env } from './utils.js'
 
 let feishuTenantToken = null
 let feishuTokenExpiresAt = 0
+let feishuTokenRefreshing = null
 let wechatAccessToken = null
 let wechatAccessTokenExpiresAt = 0
-
-function env(name) {
-  return String(globalThis.process?.env?.[name] || '').trim()
-}
+let wechatTokenRefreshing = null
 
 async function sendDiscord({ channelId }, content) {
   const token = env('DISCORD_BOT_TOKEN')
@@ -27,14 +26,22 @@ async function getFeishuTenantToken() {
   const appSecret = env('FEISHU_APP_SECRET')
   if (!appId || !appSecret) throw new Error('FEISHU_APP_ID/FEISHU_APP_SECRET not configured')
   if (feishuTenantToken && Date.now() < feishuTokenExpiresAt) return feishuTenantToken
-  const res = await requestJson('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-    method: 'POST',
-    body: { app_id: appId, app_secret: appSecret },
-  })
-  if (!res.ok || res.data?.code !== 0) throw new Error(`Feishu token failed: ${res.text}`)
-  feishuTenantToken = res.data.tenant_access_token
-  feishuTokenExpiresAt = Date.now() + Math.max(60, Number(res.data.expire || 7200) - 120) * 1000
-  return feishuTenantToken
+  if (feishuTokenRefreshing) return feishuTokenRefreshing
+  feishuTokenRefreshing = (async () => {
+    try {
+      const res = await requestJson('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        method: 'POST',
+        body: { app_id: appId, app_secret: appSecret },
+      })
+      if (!res.ok || res.data?.code !== 0) throw new Error(`Feishu token failed: ${res.text}`)
+      feishuTenantToken = res.data.tenant_access_token
+      feishuTokenExpiresAt = Date.now() + Math.max(60, Number(res.data.expire || 7200) - 120) * 1000
+      return feishuTenantToken
+    } finally {
+      feishuTokenRefreshing = null
+    }
+  })()
+  return feishuTokenRefreshing
 }
 
 async function sendFeishu({ receiveIdType, receiveId }, content) {
@@ -58,12 +65,20 @@ async function getWechatAccessToken() {
   const secret = env('WECHAT_OFFICIAL_APP_SECRET')
   if (!appId || !secret) throw new Error('WECHAT_OFFICIAL_APP_ID/WECHAT_OFFICIAL_APP_SECRET not configured')
   if (wechatAccessToken && Date.now() < wechatAccessTokenExpiresAt) return wechatAccessToken
-  const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appId)}&secret=${encodeURIComponent(secret)}`
-  const res = await requestJson(url)
-  if (!res.ok || !res.data?.access_token) throw new Error(`WeChat token failed: ${res.text}`)
-  wechatAccessToken = res.data.access_token
-  wechatAccessTokenExpiresAt = Date.now() + Math.max(60, Number(res.data.expires_in || 7200) - 120) * 1000
-  return wechatAccessToken
+  if (wechatTokenRefreshing) return wechatTokenRefreshing
+  wechatTokenRefreshing = (async () => {
+    try {
+      const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appId)}&secret=${encodeURIComponent(secret)}`
+      const res = await requestJson(url)
+      if (!res.ok || !res.data?.access_token) throw new Error(`WeChat token failed: ${res.text}`)
+      wechatAccessToken = res.data.access_token
+      wechatAccessTokenExpiresAt = Date.now() + Math.max(60, Number(res.data.expires_in || 7200) - 120) * 1000
+      return wechatAccessToken
+    } finally {
+      wechatTokenRefreshing = null
+    }
+  })()
+  return wechatTokenRefreshing
 }
 
 async function sendWechatOfficial({ openId }, content) {

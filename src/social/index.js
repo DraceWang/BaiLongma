@@ -1,22 +1,51 @@
 import { startDiscordConnector } from './discord.js'
 
-const running = []
+const running = new Map() // platform → connector
 
 export async function startSocialConnectors({ pushMessage, emitEvent } = {}) {
   const starters = [
-    () => startDiscordConnector({ pushMessage, emitEvent }),
+    { platform: 'discord', start: () => startDiscordConnector({ pushMessage, emitEvent }) },
   ]
 
-  for (const start of starters) {
+  for (const { platform, start } of starters) {
     try {
       const connector = await start()
-      if (connector) running.push(connector)
+      if (connector) {
+        running.set(platform, connector)
+        emitEvent?.('social_status', { platform, status: 'started' })
+      }
     } catch (error) {
-      console.warn(`[social] connector failed: ${error.message}`)
-      emitEvent?.('social_status', { status: 'error', error: error.message })
+      console.error(`[social] ${platform} connector failed to start: ${error.message}`)
+      emitEvent?.('social_status', { status: 'start_error', platform, error: error.message })
     }
   }
 
-  return running
+  return [...running.values()]
 }
 
+// 热重启单个平台连接器（用于设置界面保存 token 后立即生效）
+export async function restartConnector(platform, { pushMessage, emitEvent } = {}) {
+  const existing = running.get(platform)
+  if (existing) {
+    try { existing.stop() } catch {}
+    running.delete(platform)
+  }
+
+  const starters = {
+    discord: () => startDiscordConnector({ pushMessage, emitEvent }),
+  }
+
+  const start = starters[platform]
+  if (!start) return
+
+  try {
+    const connector = await start()
+    if (connector) {
+      running.set(platform, connector)
+      emitEvent?.('social_status', { platform, status: 'restarted' })
+    }
+  } catch (error) {
+    console.error(`[social] ${platform} restart failed: ${error.message}`)
+    emitEvent?.('social_status', { status: 'start_error', platform, error: error.message })
+  }
+}
