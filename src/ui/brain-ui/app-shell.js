@@ -158,7 +158,7 @@ const createSettingsModal = () => `
         <button class="settings-nav-item" data-tab="llm" type="button">LLM 模型</button>
         <button class="settings-nav-item" data-tab="media" type="button">媒体能力</button>
         <button class="settings-nav-item" data-tab="social" type="button">社交媒体</button>
-        <button class="settings-nav-item" data-tab="voice" type="button">语音</button>
+        <button class="settings-nav-item" data-tab="voice" type="button">语音识别</button>
       </nav>
 
       <!-- 内容区 -->
@@ -296,6 +296,21 @@ const createSettingsModal = () => `
               <input class="settings-input" id="social-wecom-token" type="password" placeholder="留空保持原值…" autocomplete="new-password">
             </div>
           </div>
+          <div class="settings-section">
+            <div class="settings-section-label">微信 ClawBot（个人微信）</div>
+            <div class="settings-platform-status" id="social-status-clawbot">○ 未连接</div>
+            <p class="settings-hint">点击「连接微信」后会生成二维码，用微信扫码即可绑定个人账号。凭证保存在本地，重启后无需重新扫码。</p>
+            <div class="settings-row" style="gap:8px;flex-wrap:wrap;">
+              <button class="settings-save-btn" id="clawbot-connect-btn" type="button" style="width:auto;padding:0 16px;">连接微信</button>
+              <button class="settings-save-btn" id="clawbot-logout-btn" type="button" style="width:auto;padding:0 16px;background:var(--danger,#c0392b);">断开</button>
+            </div>
+            <div id="clawbot-qr-area" style="display:none;margin-top:12px;text-align:center;">
+              <p class="settings-hint" style="margin-bottom:8px;">用微信扫描下方二维码：</p>
+              <img id="clawbot-qr-img" src="" alt="微信二维码" style="width:200px;height:200px;border:1px solid var(--border);border-radius:4px;">
+              <p class="settings-hint" style="margin-top:6px;font-size:11px;" id="clawbot-qr-hint">等待扫码…</p>
+            </div>
+            <span class="settings-feedback" id="clawbot-feedback"></span>
+          </div>
           <div class="settings-section settings-section-action">
             <button class="settings-save-btn" id="settings-save-social" type="button">保存所有</button>
             <span class="settings-feedback" id="settings-social-feedback"></span>
@@ -311,9 +326,7 @@ const createSettingsModal = () => `
               <label class="settings-label" for="voice-lang-select">识别语言</label>
               <select class="settings-select" id="voice-lang-select">
                 <option value="zh-CN">中文（普通话）</option>
-                <option value="zh-TW">中文（繁体）</option>
                 <option value="en-US">English (US)</option>
-                <option value="ja-JP">日本語</option>
               </select>
             </div>
             <div class="settings-row">

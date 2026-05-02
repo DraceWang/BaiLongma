@@ -1,6 +1,7 @@
 import { requestJson } from './http.js'
 import { parseSocialTarget } from './targets.js'
 import { env } from './utils.js'
+import { sendClawbotMessage } from './wechat-clawbot.js'
 
 let feishuTenantToken = null
 let feishuTokenExpiresAt = 0
@@ -106,6 +107,10 @@ async function sendWeComWebhook(target, content) {
   return { ok: true, platform: 'wecom-webhook' }
 }
 
+async function sendClawbot({ userId }, content) {
+  return sendClawbotMessage(userId, content)
+}
+
 export async function dispatchSocialMessage(targetId, content) {
   const target = parseSocialTarget(targetId)
   if (!target) return null
@@ -118,6 +123,8 @@ export async function dispatchSocialMessage(targetId, content) {
       return await sendWechatOfficial(target, content)
     case 'wecom-webhook':
       return await sendWeComWebhook(target, content)
+    case 'wechat-clawbot':
+      return sendClawbot(target, content)
     default:
       return null
   }

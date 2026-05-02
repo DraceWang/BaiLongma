@@ -1221,6 +1221,9 @@ function handle({ type, data = {} }) {
     case "media_mode":
       window.dispatchEvent(new CustomEvent("bailongma:media", { detail: data }));
       break;
+    case "social_status":
+      window.dispatchEvent(new CustomEvent("bailongma:social_status", { detail: data }));
+      break;
     default:
       break;
   }
@@ -1597,6 +1600,104 @@ window.addEventListener("beforeunload", () => {
       }
     } catch { showFeedback(minimaxFeedback, "请求失败", true); }
     finally { saveMinimaxBtn.disabled = false; }
+  });
+
+  // ── 微信 ClawBot 扫码 ──
+  const clawbotConnectBtn = document.getElementById("clawbot-connect-btn");
+  const clawbotLogoutBtn  = document.getElementById("clawbot-logout-btn");
+  const clawbotQrArea     = document.getElementById("clawbot-qr-area");
+  const clawbotQrImg      = document.getElementById("clawbot-qr-img");
+  const clawbotQrHint     = document.getElementById("clawbot-qr-hint");
+  const clawbotFeedback   = document.getElementById("clawbot-feedback");
+  const clawbotStatus     = document.getElementById("social-status-clawbot");
+  let clawbotPollTimer    = null;
+
+  function setClawbotStatus(text, ok) {
+    if (!clawbotStatus) return;
+    clawbotStatus.textContent = ok ? `● ${text}` : `○ ${text}`;
+    clawbotStatus.className = `settings-platform-status ${ok ? "ok" : "miss"}`;
+  }
+
+  function stopClawbotPoll() {
+    if (clawbotPollTimer) { clearInterval(clawbotPollTimer); clawbotPollTimer = null; }
+  }
+
+  async function pollClawbotQR() {
+    try {
+      const data = await fetch(`${API}/social/wechat-clawbot/qr`).then(r => r.json());
+      if (data.status === "connected") {
+        stopClawbotPoll();
+        if (clawbotQrArea) clawbotQrArea.style.display = "none";
+        setClawbotStatus("已连接", true);
+        if (clawbotFeedback) showFeedback(clawbotFeedback, "微信绑定成功！");
+        loadSocialSettings();
+      } else if (data.status === "qr_ready" && data.qr_url) {
+        if (clawbotQrImg) clawbotQrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data.qr_url)}`;
+        if (clawbotQrArea) clawbotQrArea.style.display = "block";
+        if (clawbotQrHint) clawbotQrHint.textContent = "等待扫码…";
+        setClawbotStatus("等待扫码", false);
+      } else if (data.status === "qr_pending") {
+        if (clawbotQrHint) clawbotQrHint.textContent = "正在生成二维码…";
+      } else if (data.status === "error") {
+        stopClawbotPoll();
+        if (clawbotQrArea) clawbotQrArea.style.display = "none";
+        setClawbotStatus("连接失败", false);
+        if (clawbotFeedback) showFeedback(clawbotFeedback, data.error || "连接失败", true);
+      }
+    } catch {}
+  }
+
+  // 初始化时检查一次当前状态
+  if (clawbotConnectBtn) {
+    pollClawbotQR();
+  }
+
+  clawbotConnectBtn?.addEventListener("click", async () => {
+    if (clawbotQrArea) clawbotQrArea.style.display = "none";
+    setClawbotStatus("正在启动…", false);
+    stopClawbotPoll();
+    // 触发后端重启 ClawBot 连接器
+    try {
+      await fetch(`${API}/settings/social`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ _clawbot_connect: "1" }),
+      });
+    } catch {}
+    // 开始轮询 QR 状态
+    await pollClawbotQR();
+    clawbotPollTimer = setInterval(pollClawbotQR, 2000);
+  });
+
+  clawbotLogoutBtn?.addEventListener("click", async () => {
+    stopClawbotPoll();
+    if (clawbotQrArea) clawbotQrArea.style.display = "none";
+    try {
+      await fetch(`${API}/social/wechat-clawbot/logout`, { method: "POST" });
+      setClawbotStatus("已断开", false);
+      showFeedback(clawbotFeedback, "已断开微信连接");
+    } catch {
+      showFeedback(clawbotFeedback, "请求失败", true);
+    }
+  });
+
+  // 监听 SSE 事件更新 ClawBot 状态
+  window.addEventListener("bailongma:social_status", (e) => {
+    const d = e.detail;
+    if (d?.platform !== "wechat-clawbot") return;
+    if (d.status === "connected") {
+      stopClawbotPoll();
+      if (clawbotQrArea) clawbotQrArea.style.display = "none";
+      setClawbotStatus("已连接", true);
+    } else if (d.status === "qr_ready") {
+      if (!clawbotPollTimer) clawbotPollTimer = setInterval(pollClawbotQR, 2000);
+      pollClawbotQR();
+    } else if (d.status === "session_expired") {
+      stopClawbotPoll();
+      setClawbotStatus("会话过期，请重新扫码", false);
+    } else if (d.status === "idle") {
+      setClawbotStatus("未连接", false);
+    }
   });
 })();
 

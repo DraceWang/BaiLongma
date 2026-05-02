@@ -1,10 +1,12 @@
 import { startDiscordConnector } from './discord.js'
+import { startClawbotConnector } from './wechat-clawbot.js'
 
 const running = new Map() // platform → connector
 
 export async function startSocialConnectors({ pushMessage, emitEvent } = {}) {
   const starters = [
     { platform: 'discord', start: () => startDiscordConnector({ pushMessage, emitEvent }) },
+    { platform: 'wechat-clawbot', start: () => startClawbotConnector({ pushMessage, emitEvent }) },
   ]
 
   for (const { platform, start } of starters) {
@@ -33,6 +35,7 @@ export async function restartConnector(platform, { pushMessage, emitEvent } = {}
 
   const starters = {
     discord: () => startDiscordConnector({ pushMessage, emitEvent }),
+    'wechat-clawbot': () => startClawbotConnector({ pushMessage, emitEvent }),
   }
 
   const start = starters[platform]

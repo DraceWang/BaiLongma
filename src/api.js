@@ -1,6 +1,7 @@
 import http from 'http'
 import fs from 'fs'
 import path from 'path'
+import net from 'net'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { WebSocketServer } from 'ws'
@@ -17,6 +18,7 @@ import { replaceProvider } from './providers/registry.js'
 import { persistAppState } from './capabilities/executor.js'
 import { MinimaxProvider } from './providers/minimax.js'
 import { handleSocialWebhook, isSocialWebhookPath } from './social/webhooks.js'
+import { getClawbotQR, logoutClawbot } from './social/wechat-clawbot.js'
 import { startVoiceServer, stopVoiceServer, getVoiceStatus } from './voice/manager.js'
 
 export { emitEvent }
@@ -39,11 +41,20 @@ function getApiHost() {
   return String(globalThis.process?.env?.BAILONGMA_HOST || DEFAULT_API_HOST).trim() || DEFAULT_API_HOST
 }
 
+function isLanAccessEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(globalThis.process?.env?.BAILONGMA_ALLOW_LAN || '').trim())
+}
+
+function normalizeRemoteAddress(address = '') {
+  const value = String(address || '').trim().toLowerCase()
+  if (value.startsWith('::ffff:')) return value.slice('::ffff:'.length)
+  return value
+}
+
 function isLoopbackAddress(address = '') {
-  const value = String(address || '').toLowerCase()
+  const value = normalizeRemoteAddress(address)
   return value === '127.0.0.1'
     || value === '::1'
-    || value === '::ffff:127.0.0.1'
     || value === 'localhost'
 }
 
@@ -51,11 +62,45 @@ function isLoopbackRequest(req) {
   return isLoopbackAddress(req.socket?.remoteAddress)
 }
 
+function isPrivateLanAddress(address = '') {
+  const value = normalizeRemoteAddress(address)
+  if (!value) return false
+
+  if (net.isIP(value) === 4) {
+    const [a, b] = value.split('.').map(part => Number(part))
+    return a === 10
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 169 && b === 254)
+  }
+
+  if (net.isIP(value) === 6) {
+    return value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe80:')
+  }
+
+  return false
+}
+
+function isLanRequest(req) {
+  return isLanAccessEnabled() && isPrivateLanAddress(req.socket?.remoteAddress)
+}
+
 function isLoopbackOrigin(origin = '') {
   if (!origin || origin === 'null') return true
   try {
     const parsed = new URL(origin)
     return ['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
+function isAllowedOrigin(origin = '') {
+  if (isLoopbackOrigin(origin)) return true
+  if (!isLanAccessEnabled()) return false
+  try {
+    const parsed = new URL(origin)
+    return isPrivateLanAddress(parsed.hostname)
   } catch {
     return false
   }
@@ -75,9 +120,13 @@ function hasValidAuthToken(req, url) {
 }
 
 function requireLocalOrToken(req, res, url) {
-  if (isLoopbackRequest(req) || hasValidAuthToken(req, url)) return true
+  if (hasAllowedAccess(req, url)) return true
   jsonResponse(res, 403, { ok: false, error: 'forbidden' })
   return false
+}
+
+function hasAllowedAccess(req, url) {
+  return isLoopbackRequest(req) || hasValidAuthToken(req, url) || isLanRequest(req)
 }
 
 function isSensitivePath(pathname) {
@@ -255,19 +304,33 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
     const url = new URL(req.url, base)
     const origin = req.headers.origin
 
+    // GET /social/wechat-clawbot/qr — 获取当前二维码状态和 URL
+    if (req.method === 'GET' && url.pathname === '/social/wechat-clawbot/qr') {
+      if (!hasAllowedAccess(req, url)) return jsonResponse(res, 403, { ok: false, error: 'forbidden' })
+      return jsonResponse(res, 200, { ok: true, ...getClawbotQR() })
+    }
+
+    // POST /social/wechat-clawbot/logout — 清除凭证并断开连接
+    if (req.method === 'POST' && url.pathname === '/social/wechat-clawbot/logout') {
+      if (!requireLocalOrToken(req, res, url)) return
+      logoutClawbot()
+      emitEvent('social_status', { platform: 'wechat-clawbot', status: 'idle' })
+      return jsonResponse(res, 200, { ok: true })
+    }
+
     if (isSocialWebhookPath(url.pathname)) {
       return handleSocialWebhook(req, res, url)
     }
 
-    if (origin && !isLoopbackOrigin(origin)) {
+    if (origin && !isAllowedOrigin(origin)) {
       return jsonResponse(res, 403, { ok: false, error: 'forbidden origin' })
     }
 
-    if (!isLoopbackRequest(req) && !hasValidAuthToken(req, url)) {
+    if (!hasAllowedAccess(req, url)) {
       return jsonResponse(res, 403, { ok: false, error: 'forbidden' })
     }
 
-    if (isLoopbackOrigin(origin)) {
+    if (isAllowedOrigin(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin || 'null')
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -633,6 +696,12 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
               )
             }
           }
+          // 用户点击「连接微信」时触发 ClawBot 连接器重启
+          if (updates._clawbot_connect) {
+            restartConnector('wechat-clawbot', { pushMessage, emitEvent }).catch(err =>
+              console.warn('[social] restart wechat-clawbot failed:', err.message)
+            )
+          }
           jsonResponse(res, 200, { ok: true, social: getSocialConfig() })
         } catch (err) {
           jsonResponse(res, 400, { ok: false, error: err.message })
@@ -966,12 +1035,12 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
     const url = new URL(req.url, `http://localhost:${port}`)
     if (url.pathname === '/acui') {
       const origin = req.headers.origin
-      if (origin && !isLoopbackOrigin(origin)) {
+      if (origin && !isAllowedOrigin(origin)) {
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
         socket.destroy()
         return
       }
-      if (!isLoopbackRequest(req) && !hasValidAuthToken(req, url)) {
+      if (!hasAllowedAccess(req, url)) {
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
         socket.destroy()
         return

@@ -282,6 +282,29 @@ const SOCIAL_ENV_KEYS = [
   'WECOM_BOT_KEY', 'WECOM_INCOMING_TOKEN',
 ]
 
+// ── WeChat ClawBot 凭证（扫码后自动写入，不暴露到 SOCIAL_ENV_KEYS）──
+
+export function getClawbotCredentials() {
+  try {
+    const stored = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))
+    const c = stored?.clawbot
+    return (c?.accountId && c?.botToken) ? c : null
+  } catch { return null }
+}
+
+export function setClawbotCredentials({ accountId, botToken, baseUrl }) {
+  let existing = {}
+  try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
+  writeStoredConfig({ ...existing, clawbot: { accountId, botToken, baseUrl } })
+}
+
+export function clearClawbotCredentials() {
+  let existing = {}
+  try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
+  const { clawbot: _, ...rest } = existing
+  writeStoredConfig(rest)
+}
+
 export function getSocialConfig() {
   let stored = {}
   try { stored = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))?.social || {} } catch {}

@@ -15,6 +15,9 @@ export function parseSocialTarget(targetId = '') {
   if (raw.startsWith('wecom:webhook:')) {
     return { platform: 'wecom-webhook', key: raw.slice('wecom:webhook:'.length), raw }
   }
+  if (raw.startsWith('wechat:clawbot:')) {
+    return { platform: 'wechat-clawbot', userId: raw.slice('wechat:clawbot:'.length), raw }
+  }
   return null
 }
 
