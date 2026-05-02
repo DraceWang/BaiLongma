@@ -446,7 +446,6 @@ export function createBrainUiMarkup() {
     createVideoPanel(),
     createMusicPanel(),
     createImagePanel(),
-    createPanelTabs(),
   ].join("\n\n");
 }
 

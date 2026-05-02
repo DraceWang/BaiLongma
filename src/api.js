@@ -458,6 +458,53 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       return
     }
 
+    // GET /media/music/:filename — 提供 musicDir 音频文件（避免 file:// 跨源限制）
+    if (req.method === 'GET' && url.pathname.startsWith('/media/music/')) {
+      const raw = url.pathname.slice('/media/music/'.length)
+      const filename = path.basename(decodeURIComponent(raw))
+      const filePath = path.join(paths.musicDir, filename)
+      const resolvedFile = path.resolve(filePath)
+      const resolvedDir  = path.resolve(paths.musicDir)
+      if (!resolvedFile.startsWith(resolvedDir + path.sep) && resolvedFile !== resolvedDir) {
+        res.writeHead(403); res.end('forbidden'); return
+      }
+      const mimeMap = {
+        '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.wav': 'audio/wav',
+        '.aac': 'audio/aac',  '.ogg': 'audio/ogg',   '.m4a': 'audio/mp4',
+        '.opus': 'audio/ogg; codecs=opus',
+      }
+      const contentType = mimeMap[path.extname(filename).toLowerCase()] || 'audio/mpeg'
+      try {
+        const stat = fs.statSync(filePath)
+        const total = stat.size
+        const rangeHeader = req.headers.range
+        if (rangeHeader) {
+          const m = rangeHeader.match(/bytes=(\d*)-(\d*)/)
+          const start = m[1] ? parseInt(m[1]) : 0
+          const end   = m[2] ? parseInt(m[2]) : total - 1
+          res.writeHead(206, {
+            'Content-Type': contentType,
+            'Content-Range': `bytes ${start}-${end}/${total}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': end - start + 1,
+            'Cache-Control': 'no-cache',
+          })
+          fs.createReadStream(filePath, { start, end }).pipe(res)
+        } else {
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Content-Length': total,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache',
+          })
+          fs.createReadStream(filePath).pipe(res)
+        }
+      } catch {
+        res.writeHead(404); res.end('music file not found')
+      }
+      return
+    }
+
     // GET /audio/:filename — 提供 sandbox 音频文件
     if (req.method === 'GET' && url.pathname.startsWith('/audio/')) {
       const filename = path.basename(url.pathname)

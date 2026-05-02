@@ -1642,9 +1642,15 @@ initVoicePanel({
   function localPathToUrl(src) {
     const s = String(src || "").trim();
     if (!s) return "";
-    if (/^https?:\/\//i.test(s) || /^file:\/\//i.test(s)) return s;
-    // Windows / Unix local path → file:// URL
-    return "file:///" + s.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (/^https?:\/\//i.test(s)) return s;
+    // Local path (file:// or absolute) → backend HTTP media endpoint，避免 file:// 跨源限制
+    let resolved = s;
+    if (/^file:\/\//i.test(s)) {
+      resolved = decodeURIComponent(s.replace(/^file:\/\/\//i, "").replace(/^file:\/\//i, ""));
+    }
+    const filename = resolved.split(/[\\/]/).filter(Boolean).pop() || "";
+    if (!filename) return s;
+    return "/media/music/" + encodeURIComponent(filename);
   }
 
   function extractYoutubeId(url) {
@@ -1986,6 +1992,7 @@ initVoicePanel({
 
   let musicActive  = false;
   let musicPlaying = false;
+  let musicWasPlayingBeforeHide = false;
   let lrcLines     = [];
   let playlist     = [];
   let playlistIdx  = 0;
@@ -2127,12 +2134,13 @@ initVoicePanel({
 
   function toggleMusicPanelVisibility() {
     if (musicActive) {
+      musicWasPlayingBeforeHide = musicPlaying;
       setMusicPlaying(false);
       setMusicPanelVisible(false);
     } else if (musicAudio?.src) {
       if (videoActive) closeAndDestroyVideo();
       setMusicPanelVisible(true);
-      setMusicPlaying(true);
+      if (musicWasPlayingBeforeHide) setMusicPlaying(true);
     }
   }
 
