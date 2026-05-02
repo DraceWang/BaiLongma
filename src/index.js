@@ -45,8 +45,14 @@ const birthTime = getOrInitBirthTime()
 
 // 从数据库恢复持久化任务（重启后不丢失）
 const persistedTask = getConfig('current_task')
+let persistedTaskSteps = []
+try {
+  const raw = getConfig('current_task_steps')
+  if (raw) persistedTaskSteps = JSON.parse(raw)
+} catch {}
 if (persistedTask) {
   console.log(`[系统] 恢复进行中的任务：${persistedTask.slice(0, 80)}`)
+  if (persistedTaskSteps.length) console.log(`[系统] 恢复任务步骤：${persistedTaskSteps.length} 步`)
 }
 
 // 注册 Provider（多媒体能力用 MiniMax，独立于 LLM 选择）
@@ -70,6 +76,7 @@ if (config.needsActivation) {
 const state = {
   action: null,
   task: persistedTask || null,
+  taskSteps: persistedTaskSteps,  // [{ text, status, note }]，status: pending/done/failed/skipped
   prev_recall: null,
   lastToolResult: null, // 上一轮工具调用结果，下一个 TICK 由注入器注入后清空
   sessionCounter: 0,
@@ -144,11 +151,56 @@ export function buildToolContext({ currentTargetId = null, conversationWindow = 
 }
 
 function buildToolContextForProcess(msg, injection) {
-  return buildToolContext({
+  const base = buildToolContext({
     currentTargetId: msg?.reminderTargetId || msg?.fromId || null,
     conversationWindow: injection.conversationWindow || [],
     includeRecentPartners: true,
   })
+
+  return {
+    ...base,
+
+    onSetTask: (description, steps) => {
+      state.task = description
+      state.taskSteps = steps.map(s => ({ text: s, status: 'pending', note: '' }))
+      setConfig('current_task', description)
+      setConfig('current_task_steps', JSON.stringify(state.taskSteps))
+      console.log(`[任务] 已开启：${description}（${steps.length} 步）`)
+      emitEvent('task_set', { task: description, steps })
+    },
+
+    onCompleteTask: (summary) => {
+      const clearedTask = state.task
+      state.task = null
+      state.taskSteps = []
+      setConfig('current_task', '')
+      setConfig('current_task_steps', '[]')
+      console.log(`[任务] 已完成：${clearedTask}`)
+      emitEvent('task_cleared', { task: clearedTask, summary })
+      if (clearedTask) {
+        insertMemory({
+          event_type: 'task_complete',
+          content: `任务已完成：${clearedTask.slice(0, 60)}${summary ? ' — ' + summary.slice(0, 60) : ''}`,
+          detail: '任务已通过 complete_task 工具标记为完成',
+          entities: [], concepts: [], tags: ['task_complete'],
+          timestamp: nowTimestamp(),
+        })
+      }
+    },
+
+    onUpdateTaskStep: (idx, status, note) => {
+      if (!state.taskSteps[idx]) return { error: `步骤 ${idx + 1} 不存在（共 ${state.taskSteps.length} 步）` }
+      state.taskSteps[idx] = { ...state.taskSteps[idx], status, note }
+      setConfig('current_task_steps', JSON.stringify(state.taskSteps))
+      const done = state.taskSteps.filter(s => s.status === 'done').length
+      emitEvent('task_step_updated', { index: idx, status, note, progress: `${done}/${state.taskSteps.length}` })
+      return {}
+    },
+
+    onRecall: (query) => {
+      state.prev_recall = query
+    },
+  }
 }
 
 function formatConversationMessage(row, currentMsg = null) {
@@ -172,8 +224,25 @@ function formatConversationMessage(row, currentMsg = null) {
   }
 }
 
-function buildRuntimeContextMessages({ recentActions = [], actionLog = [], lastToolResult = null } = {}) {
+function formatTaskSteps(taskSteps = []) {
+  if (!taskSteps?.length) return ''
+  const statusIcon = { done: '✓', failed: '✗', skipped: '—', pending: '○' }
+  const lines = taskSteps.map((s, i) => {
+    const icon = statusIcon[s.status] || '○'
+    const note = s.note ? ` (${s.note})` : ''
+    return `  ${i + 1}. [${icon}] ${s.text}${note}`
+  })
+  const done = taskSteps.filter(s => s.status === 'done').length
+  const total = taskSteps.length
+  return `任务步骤进度（${done}/${total}）：\n${lines.join('\n')}`
+}
+
+function buildRuntimeContextMessages({ recentActions = [], actionLog = [], lastToolResult = null, taskSteps = [] } = {}) {
   const parts = []
+
+  if (taskSteps?.length > 0) {
+    parts.push(formatTaskSteps(taskSteps))
+  }
 
   if (recentActions?.length > 0) {
     const lines = recentActions.map(item => `- ${item.ts?.slice(11, 16) || ''} ${item.summary || ''}`).join('\n')
@@ -204,9 +273,9 @@ function buildRuntimeContextMessages({ recentActions = [], actionLog = [], lastT
   }]
 }
 
-function buildLLMMessages({ systemPrompt, conversationWindow = [], input, msg = null, recentActions = [], actionLog = [], lastToolResult = null }) {
+function buildLLMMessages({ systemPrompt, conversationWindow = [], input, msg = null, recentActions = [], actionLog = [], lastToolResult = null, taskSteps = [] }) {
   const messages = [{ role: 'system', content: systemPrompt }]
-  messages.push(...buildRuntimeContextMessages({ recentActions, actionLog, lastToolResult }))
+  messages.push(...buildRuntimeContextMessages({ recentActions, actionLog, lastToolResult, taskSteps }))
 
   const rows = Array.isArray(conversationWindow) ? conversationWindow : []
   for (const row of rows) {
@@ -459,6 +528,7 @@ async function process(input, label, msg = null) {
       recentActions: state.recentActions,
       actionLog: injection.actionLog || [],
       lastToolResult: injection.lastToolResult || null,
+      taskSteps: state.taskSteps,
     })
 
     // 发出完整系统提示词事件
@@ -842,6 +912,7 @@ async function main() {
     getStateSnapshot: () => ({
       action: state.action,
       task: state.task,
+      taskSteps: (state.taskSteps || []).map(s => ({ ...s })),
       prev_recall: state.prev_recall,
       lastToolResult: state.lastToolResult
         ? { ...state.lastToolResult, args: { ...(state.lastToolResult.args || {}) } }

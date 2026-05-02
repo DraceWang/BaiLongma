@@ -349,6 +349,14 @@ async function executeToolUnchecked(name, args, context = {}) {
         return execManageApp(args)
       case 'ui_register':
         return execUIRegister(args)
+      case 'set_task':
+        return execSetTask(args, context)
+      case 'complete_task':
+        return execCompleteTask(args, context)
+      case 'update_task_step':
+        return execUpdateTaskStep(args, context)
+      case 'recall_memory':
+        return await execRecallMemory(args, context)
       default:
         return `错误：未知工具 "${name}"`
     }
@@ -2169,4 +2177,46 @@ function execUIRegister({ component_name, code, props_schema, use_case, example_
 
   emitEvent('action', { tool: 'ui_register', summary: `转正组件 ${component_name}`, detail: kebab })
   return JSON.stringify({ ok: true, component_name, file: `${kebab}.js` })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 任务管理工具（通过 context 回调通知 index.js）
+// ─────────────────────────────────────────────────────────────────────────────
+
+function execSetTask({ description, steps = [] }, context) {
+  if (!description?.trim()) return '错误：未提供任务描述'
+  if (!Array.isArray(steps) || steps.length === 0) return '错误：steps 不能为空，请提供具体执行步骤'
+  if (!context?.onSetTask) return '错误：任务管理回调未注册'
+  const cleanSteps = steps.map(s => String(s).trim()).filter(Boolean)
+  context.onSetTask(description.trim(), cleanSteps)
+  return `任务已开启：${description}\n步骤（${cleanSteps.length} 个）：\n${cleanSteps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+}
+
+function execCompleteTask({ summary = '' }, context) {
+  if (!context?.onCompleteTask) return '错误：任务管理回调未注册'
+  context.onCompleteTask(String(summary || '').trim())
+  return `任务已完成${summary ? '：' + summary : ''}`
+}
+
+function execUpdateTaskStep({ step_index, status, note = '' }, context) {
+  if (step_index === undefined || step_index === null) return '错误：未提供步骤编号'
+  const idx = Number(step_index)
+  if (!Number.isInteger(idx) || idx < 0) return '错误：步骤编号必须为非负整数'
+  if (!['done', 'failed', 'skipped'].includes(status)) return '错误：status 必须为 done/failed/skipped'
+  if (!context?.onUpdateTaskStep) return '错误：任务管理回调未注册'
+  const result = context.onUpdateTaskStep(idx, status, String(note || '').trim())
+  if (result?.error) return `错误：${result.error}`
+  const statusLabel = { done: '完成 ✓', failed: '失败 ✗', skipped: '跳过 —' }[status]
+  return `步骤 ${idx + 1} 已标记为${statusLabel}${note ? '：' + note : ''}`
+}
+
+async function execRecallMemory({ query }, context) {
+  if (!query?.trim()) return '错误：未提供查询内容'
+  if (context?.onRecall) context.onRecall(query.trim())
+  const rows = searchMemories(query.trim(), 8)
+  if (rows.length === 0) return `记忆库中未找到与"${query}"相关的内容，已标记下轮持续关注此主题。`
+  const results = rows.map(m =>
+    `[${m.timestamp.slice(0, 10)}] ${m.event_type || m.type || ''}: ${m.content}\n  ${(m.detail || '').slice(0, 100)}`
+  ).join('\n\n')
+  return `已找到 ${rows.length} 条相关记忆（下轮将持续注入此主题）：\n\n${results}`
 }

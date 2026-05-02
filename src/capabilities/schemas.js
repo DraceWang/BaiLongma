@@ -745,6 +745,77 @@ export const TOOL_SCHEMAS = {
       }
     }
   },
+
+  set_task: {
+    type: 'function',
+    function: {
+      name: 'set_task',
+      description: '开启一个多步任务。提供任务总目标和具体步骤列表，系统将持久化追踪每步状态，重启后自动恢复。调用后 TICK 节奏加速以持续推进任务。每次只能有一个活跃任务。',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: { type: 'string', description: '任务的总体目标，说明最终要完成什么' },
+          steps: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '按顺序执行的具体步骤列表，每步说明要做什么'
+          }
+        },
+        required: ['description', 'steps']
+      }
+    }
+  },
+
+  complete_task: {
+    type: 'function',
+    function: {
+      name: 'complete_task',
+      description: '标记当前任务全部完成。将停止加速 TICK，写入完成记录，清除任务状态。所有步骤完成后调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: '任务完成情况的简短总结（可选）' }
+        },
+        required: []
+      }
+    }
+  },
+
+  update_task_step: {
+    type: 'function',
+    function: {
+      name: 'update_task_step',
+      description: '更新当前任务某个步骤的完成状态。每完成、失败或跳过一个步骤时立即调用，用于实时追踪进度。',
+      parameters: {
+        type: 'object',
+        properties: {
+          step_index: { type: 'number', description: '步骤编号，从 0 开始（第一步为 0，第二步为 1）' },
+          status: {
+            type: 'string',
+            enum: ['done', 'failed', 'skipped'],
+            description: '步骤状态：done（完成）、failed（失败）、skipped（跳过）'
+          },
+          note: { type: 'string', description: '该步骤执行结果的补充说明（可选）' }
+        },
+        required: ['step_index', 'status']
+      }
+    }
+  },
+
+  recall_memory: {
+    type: 'function',
+    function: {
+      name: 'recall_memory',
+      description: '深度检索与指定主题相关的记忆，立即返回结果，并在下一轮持续聚焦此主题。比 search_memory 更深层——不只当场返回结果，还影响下一轮的记忆注入方向。适合需要深入回忆某段经历或某个概念时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '想要回忆的内容或主题' }
+        },
+        required: ['query']
+      }
+    }
+  },
 }
 
 // 根据名称列表获取 schema 数组

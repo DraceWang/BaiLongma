@@ -203,7 +203,11 @@ export async function runInjector({ message, state, hint = '' }) {
     'send_message', 'web_search', 'fetch_url', 'browser_read', 'list_dir', 'read_file', 'write_file',
     'delete_file', 'make_dir', 'exec_command', 'kill_process', 'list_processes',
     'set_tick_interval', 'media_mode', 'manage_reminder', 'manage_prefetch_task',
+    'recall_memory', 'set_task', 'music', 'manage_app', 'ui_patch',
   ]
+  if (hasTask) {
+    baseTools.push('complete_task', 'update_task_step')
+  }
   const { listCapabilities } = await import('../providers/registry.js')
   const mmCaps = listCapabilities()
   if (mmCaps.includes('tts'))    baseTools.push('speak')
