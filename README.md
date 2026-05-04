@@ -56,6 +56,17 @@ D:\claude\Bailongma\
 
 应用启动时会自动向 GitHub Releases 检查新版本，有更新会在后台下载，下次重启生效。
 
+## 在构建未来的过程中，最缺的就是钱了
+
+感谢以下网友对本项目的大力支持，没有他们项目无法持续。
+
+极客旋风、阿兵哥、钓鱼老1996、我不是牛马、AI布道大师
+
+如果你也喜欢这个项目，来吧，往我身上砸点钱。
+
+![图片](https://github.com/xiaoyuanda666-ship-it/BaiLongma/blob/main/images/DonateProject.png)
+
+
 ## 开发者：从源码运行
 
 ### 1. 安装依赖
