@@ -64,8 +64,6 @@ D:\claude\Bailongma\
 
 如果你也喜欢这个项目，来吧，往我身上砸点钱。
 
-![图片](https://github.com/xiaoyuanda666-ship-it/BaiLongma/blob/main/images/DonateProject.png)
-
 
 ## 开发者：从源码运行
 
