@@ -1,3 +1,5 @@
+import { createHotspotPanel } from './hotspot-panel.js';
+
 const createGraphStage = () => `
 <div class="grid-overlay"></div>
 <svg id="graph" aria-label="Longma memory graph"></svg>
@@ -606,6 +608,7 @@ export function createBrainUiMarkup() {
     createVideoPanel(),
     createMusicPanel(),
     createImagePanel(),
+    createHotspotPanel(),
   ].join("\n\n");
 }
 

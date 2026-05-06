@@ -5,6 +5,7 @@ import { initChat } from "./chat.js";
 import { initPanelCollapse } from "./panel-collapse.js";
 import { ThoughtStream } from "./thought-stream.js";
 import { initVoicePanel } from "./voice-panel.js";
+import { initHotspot, toggleHotspot } from "./hotspot.js";
 renderBrainUiApp(document.body);
 const THEME_KEY = "jarvis-brain-ui-theme";
 const PHYSICS_STORAGE_KEY = "jarvis-brain-ui-physics";
@@ -2031,6 +2032,9 @@ initVoicePanel({
   getAutoSend:   () => localStorage.getItem("bailongma-voice-auto-send") !== "false",
 });
 
+// ── Hotspot mode ──
+initHotspot().catch((err) => console.warn('[Hotspot] 初始化失败:', err));
+
 // ── Media modes (video / image) ──
 (function initMediaModes() {
   const videoBtn      = document.getElementById("video-btn");
@@ -2629,6 +2633,11 @@ initVoicePanel({
     if (e.key === "v" || e.key === "V") {
       e.preventDefault();
       toggleVideoPanelVisibility();
+    }
+    // H 键：切换热点模式
+    if (e.key === "h" || e.key === "H") {
+      e.preventDefault();
+      toggleHotspot();
     }
   });
 })();

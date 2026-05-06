@@ -2104,3 +2104,602 @@ body.music-playing .music-vinyl {
 }
 .music-btn:hover { color: var(--ink); background: var(--line); }
 .music-btn.active { color: var(--cool); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   热点模式面板  HOTSPOT MODE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 面板容器（从左侧弹出） ── */
+.hotspot-panel {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  bottom: 16px;
+  width: 0;
+  overflow: hidden;
+  z-index: 4;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-deep) 94%, #000d1a);
+  border: 1px solid transparent;
+  opacity: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  transition:
+    width  0.45s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.35s ease,
+    border-color 0.35s ease;
+}
+
+body.hotspot-mode .hotspot-panel {
+  width: calc(66vw - 32px);
+  opacity: 1;
+  pointer-events: auto;
+  border-color: var(--line-strong);
+}
+
+/* ── 布局联动：聊天框挤到右侧 1/3 ── */
+body.hotspot-mode #panel-l1 { transform: translateX(calc(-100% - 20px)); }
+body.hotspot-mode #panel-l2 { transform: translateX(calc(100% + 20px)); }
+body.hotspot-mode .console  { left: calc(66vw + 8px); right: 16px; }
+body.hotspot-mode #graph    { transform: translateX(24vw); }
+body.hotspot-mode .panel-tab { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+
+/* ── 顶部标题栏 ── */
+.hs-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 46px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.hs-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.hs-brand-name {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cool);
+  letter-spacing: 0.06em;
+}
+.hs-brand-dot  { font-size: 7px; color: #44ee88; animation: hs-blink 1.5s infinite; }
+.hs-brand-status { font-size: 10px; color: #44ee88; font-family: "JetBrains Mono", monospace; letter-spacing: 0.04em; }
+
+@keyframes hs-blink { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+.hs-title-block {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+}
+.hs-title-en {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hs-title-zh {
+  font-size: 10px;
+  color: var(--dim);
+  letter-spacing: 0.08em;
+  margin-top: 1px;
+}
+
+.hs-header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+.hs-header-meta {
+  display: flex;
+  gap: 14px;
+}
+.hs-header-tag {
+  font-size: 9.5px;
+  color: var(--dim);
+  font-family: "JetBrains Mono", monospace;
+  line-height: 1.4;
+  text-align: center;
+}
+.hs-tag-icon  { color: var(--cool); margin-right: 2px; }
+.hs-tag-status { color: var(--ink2); }
+
+.hs-clock-block { text-align: right; }
+.hs-clock {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+.hs-live-dot {
+  font-size: 9px;
+  color: #ff4444;
+  letter-spacing: 0.08em;
+  animation: hs-blink 1.2s infinite;
+}
+
+.hs-exit-btn {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 16px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  flex: 0 0 auto;
+  padding: 0;
+}
+.hs-exit-btn:hover { color: var(--ink); background: var(--line-strong); border-color: var(--cool); }
+
+/* ── 统计条 ── */
+.hs-stats-bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 1px;
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.hs-stat {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg1);
+  min-width: 0;
+}
+.hs-stat-icon {
+  font-size: 18px;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+.hs-stat--warn .hs-stat-icon { color: #f0a030; }
+.hs-stat--hot  .hs-stat-icon { }
+.hs-stat--data .hs-stat-icon { color: var(--cool); }
+.hs-stat--ai   .hs-stat-icon { color: #aa88ff; }
+
+.hs-stat-body { min-width: 0; }
+.hs-stat-label {
+  font-size: 9.5px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.hs-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.1;
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: -0.02em;
+}
+.hs-stat-delta {
+  font-size: 9px;
+  color: var(--dim);
+  margin-top: 1px;
+  white-space: nowrap;
+}
+.hs-delta-up   { color: #44dd88; }
+.hs-delta-down { color: #ee5555; }
+
+/* ── 主体三柱 ── */
+.hs-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+}
+
+.hs-col {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+}
+.hs-col:last-child { border-right: none; }
+
+.hs-col-left,
+.hs-col-right {
+  flex: 0 0 22%;
+  min-width: 160px;
+  gap: 0;
+}
+.hs-col-center {
+  flex: 1 1 0;
+  border-right: 1px solid var(--line);
+}
+
+/* ── 平台热榜卡片 ── */
+.hs-list-card {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+.hs-list-card:last-child { border-bottom: none; }
+
+.hs-card-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg1) 80%, transparent);
+}
+
+.hs-platform-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.hs-dot-douyin   { background: #FE2C55; box-shadow: 0 0 6px #FE2C5588; }
+.hs-dot-xhs      { background: #FF2442; box-shadow: 0 0 6px #FF244288; }
+.hs-dot-wechat   { background: #07C160; box-shadow: 0 0 6px #07C16088; }
+.hs-dot-channels { background: #1989FA; box-shadow: 0 0 6px #1989FA88; }
+
+.hs-platform-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+.hs-card-badge {
+  font-size: 9px;
+  color: var(--dim);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.5;
+  flex: 0 0 auto;
+}
+.hs-card-update {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* ── 热榜列表 ── */
+.hs-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  scrollbar-width: none;
+}
+.hs-list::-webkit-scrollbar { display: none; }
+
+.hs-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  cursor: default;
+  transition: background 0.12s ease;
+  min-width: 0;
+}
+.hs-item:hover { background: var(--line); }
+
+.hs-rank {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--dim);
+  flex: 0 0 16px;
+  text-align: center;
+  line-height: 1;
+}
+.hs-rank-top1 { color: #ff4444; }
+.hs-rank-top2 { color: #ff8800; }
+.hs-rank-top3 { color: #ffcc00; }
+
+.hs-item-text {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.hs-new-badge {
+  display: inline-block;
+  font-size: 8.5px;
+  color: #ff4444;
+  border: 1px solid #ff444466;
+  border-radius: 2px;
+  padding: 0 2px;
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
+.hs-heat {
+  font-size: 9.5px;
+  color: var(--dim);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.hs-label-badge {
+  font-size: 9px;
+  color: var(--cool);
+  border: 1px solid color-mix(in srgb, var(--cool) 30%, transparent);
+  border-radius: 3px;
+  padding: 0 3px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.hs-trend {
+  font-size: 10px;
+  font-family: "JetBrains Mono", monospace;
+  flex: 0 0 10px;
+  text-align: center;
+}
+.hs-trend-up   { color: #44dd88; }
+.hs-trend-dn   { color: #ee5555; }
+.hs-trend-same { color: var(--dim); }
+
+/* ── 中柱：地球容器 ── */
+.hs-earth-container {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, #0a1a2e 0%, #060b14 100%);
+}
+
+.hs-earth-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+.hs-earth-container canvas:active { cursor: grabbing; }
+
+.hs-earth-label {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  font-size: 9.5px;
+  color: var(--cool);
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.12em;
+  opacity: 0.7;
+  pointer-events: none;
+}
+.hs-earth-hint {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  font-size: 9px;
+  color: var(--dim);
+  pointer-events: none;
+  letter-spacing: 0.04em;
+}
+
+/* ── 中柱：辅助信息（区域关注 + 情绪指数） ── */
+.hs-center-aux {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0;
+  border-top: 1px solid var(--line);
+  height: 120px;
+}
+
+.hs-aux-box {
+  flex: 1 1 0;
+  padding: 8px 12px;
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+  min-width: 0;
+}
+.hs-aux-box:last-child { border-right: none; }
+
+.hs-aux-title {
+  font-size: 10px;
+  color: var(--ink2);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+.hs-aux-sub {
+  font-size: 8.5px;
+  color: var(--dim);
+  font-weight: 400;
+  margin-left: 4px;
+  letter-spacing: 0.06em;
+}
+
+.hs-region-list { display: flex; flex-direction: column; gap: 3px; }
+.hs-region-row  { display: flex; align-items: center; gap: 6px; }
+.hs-region-name { font-size: 9.5px; color: var(--ink2); flex: 0 0 52px; white-space: nowrap; }
+.hs-bar-track   { flex: 1 1 0; height: 3px; background: var(--line-strong); border-radius: 2px; overflow: hidden; }
+.hs-bar-fill    { height: 100%; background: linear-gradient(90deg, var(--cool), #88ccff); border-radius: 2px; transition: width 0.8s ease; }
+.hs-region-pct  { font-size: 9px; color: var(--dim); flex: 0 0 28px; text-align: right; font-family: "JetBrains Mono", monospace; }
+
+.hs-sentiment   { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.hs-sentiment-ring { position: relative; width: 80px; height: 80px; }
+.hs-ring-svg    { width: 80px; height: 80px; }
+.hs-ring-label  {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.hs-ring-num    { font-size: 18px; font-weight: 700; color: var(--ink); font-family: "JetBrains Mono", monospace; line-height: 1; }
+.hs-ring-text   { font-size: 8.5px; color: var(--dim); margin-top: 1px; }
+.hs-sentiment-delta { font-size: 9.5px; color: #44dd88; }
+
+/* ── 实时事件流 ── */
+.hs-feed-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: 146px;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.hs-feed-label {
+  flex: 0 0 auto;
+  width: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 10px;
+  border-right: 1px solid var(--line);
+  gap: 2px;
+  background: color-mix(in srgb, var(--bg1) 60%, transparent);
+}
+.hs-feed-live-dot { color: #ff4444; font-size: 8px; animation: hs-blink 1.2s infinite; }
+.hs-feed-label > span:nth-child(2) { font-size: 11px; font-weight: 700; color: var(--cool); letter-spacing: 0.06em; }
+.hs-feed-subtitle { font-size: 10px; color: var(--ink2); font-weight: 600; }
+.hs-feed-desc     { font-size: 8.5px; color: var(--dim); line-height: 1.4; margin-top: 2px; }
+
+.hs-feed-viewport {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  padding: 8px 6px;
+  display: flex;
+  align-items: stretch;
+}
+.hs-feed-viewport::-webkit-scrollbar { display: none; }
+
+.hs-feed-track {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.hs-feed-card {
+  flex: 0 0 200px;
+  background: var(--bg1);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: default;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  min-width: 0;
+}
+.hs-feed-card:hover { border-color: var(--cool); background: color-mix(in srgb, var(--bg1) 80%, var(--cool) 5%); }
+
+.hs-feed-card-top { display: flex; align-items: center; gap: 6px; }
+.hs-feed-time     { font-size: 9px; color: var(--dim); font-family: "JetBrains Mono", monospace; flex: 0 0 auto; }
+.hs-feed-cat      { font-size: 9px; border: 1px solid; border-radius: 3px; padding: 0 4px; line-height: 1.5; flex: 0 0 auto; }
+.hs-feed-title    { font-size: 11px; font-weight: 600; color: var(--ink); line-height: 1.35; }
+.hs-feed-desc     { font-size: 9.5px; color: var(--ink2); line-height: 1.4; flex: 1 1 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hs-feed-loc      { font-size: 9px; color: var(--dim); margin-top: auto; }
+
+.hs-feed-controls {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg1) 60%, transparent);
+}
+.hs-feed-auto-label {
+  font-size: 9px;
+  color: var(--dim);
+  writing-mode: vertical-rl;
+  letter-spacing: 0.06em;
+}
+.hs-feed-nav {
+  background: none;
+  border: 1px solid var(--line-strong);
+  color: var(--dim);
+  font-size: 16px;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.12s ease, background 0.12s ease;
+  padding: 0;
+}
+.hs-feed-nav:hover { color: var(--ink); background: var(--line); }
+
+/* ── 底部跑马灯 ── */
+.hs-ticker-bar {
+  flex: 0 0 auto;
+  height: 30px;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-deep) 80%, #001020 20%);
+}
+
+.hs-ticker-inner {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: hs-ticker 60s linear infinite;
+  will-change: transform;
+}
+
+@keyframes hs-ticker {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.hs-ticker-item {
+  font-size: 10.5px;
+  color: var(--ink2);
+  padding: 0 8px;
+}
+.hs-ticker-time {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9.5px;
+  color: var(--cool);
+  margin-right: 6px;
+}
+.hs-ticker-sep {
+  color: var(--dim);
+  font-size: 8px;
+  padding: 0 6px;
+}
+
