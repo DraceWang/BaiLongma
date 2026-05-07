@@ -1575,12 +1575,25 @@ window.addEventListener("beforeunload", () => {
     if (current) modelSelect.value = current;
   }
 
+  function populateProviderSelect(providers, current) {
+    if (!providerSelect || !providers) return;
+    const selected = current || providerSelect.value || "auto";
+    const options = [`<option value="auto">自动识别</option>`]
+      .concat(Object.entries(providers).map(([id, provider]) => {
+        const label = provider.label || id;
+        return `<option value="${id}">${label}</option>`;
+      }));
+    providerSelect.innerHTML = options.join("");
+    providerSelect.value = providers[selected] || selected === "auto" ? selected : "auto";
+  }
+
   async function loadSettings() {
     try {
       const data = await fetch(`${API}/settings`).then(r => r.json());
       const { llm, minimax, providers } = data;
       if (providers) cachedProviders = providers;
       refreshConfigSummary({ llm, minimax });
+      populateProviderSelect(providers, llm.provider || "auto");
       if (providerSelect && llm.provider) providerSelect.value = llm.provider;
       populateModelSelect(llm.models, llm.model);
       // 同步 temperature 滑块
@@ -1949,13 +1962,16 @@ window.addEventListener("beforeunload", () => {
   saveLlmBtn?.addEventListener("click", async () => {
     const model  = modelSelect.value;
     const apiKey = llmKeyInput.value.trim();
-    const provider = providerSelect?.value || "deepseek";
+    const provider = providerSelect?.value || "auto";
     saveLlmBtn.disabled = true;
     try {
+      const body = apiKey
+        ? { provider, apiKey, ...(provider === "auto" ? {} : { model }) }
+        : { model };
       const res = await fetch(apiKey ? `${API}/activate` : `${API}/settings/model`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(apiKey ? { provider, apiKey, model } : { model }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (data.ok) {

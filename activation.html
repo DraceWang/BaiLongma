@@ -59,7 +59,6 @@
       letter-spacing: 0.04em;
       text-transform: uppercase;
     }
-    select,
     input {
       width: 100%;
       box-sizing: border-box;
@@ -72,7 +71,6 @@
       outline: none;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    select:focus,
     input:focus {
       border-color: rgba(117, 168, 255, 0.72);
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
@@ -116,10 +114,6 @@
       font-size: 14px;
       color: #d8e4f5;
     }
-    .model-note code {
-      color: #9fcbff;
-      font-weight: 600;
-    }
     .hint {
       margin-top: 18px;
       color: #8396ae;
@@ -133,29 +127,28 @@
 <body>
   <main>
     <h1>激活 Bailongma</h1>
-    <p class="subtitle">填写 DeepSeek Key 即可完成激活。</p>
+    <p class="subtitle">输入 API Key，Bailongma 会自动识别官方模型厂商。</p>
 
     <div class="model-note">
-      模型：<code>deepseek-v4-flash</code>（思考模式）
+      支持自动检测 DeepSeek、MiniMax、OpenAI、通义千问、Moonshot、智谱等官方直连端点。
     </div>
 
     <div class="row">
-      <label for="apiKey">DeepSeek Key</label>
-      <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="请输入 DeepSeek Key" />
+      <label for="apiKey">API Key</label>
+      <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="请输入 API Key" />
     </div>
 
-    <button id="activate" disabled>验证并进入</button>
+    <button id="activate" disabled>自动识别并进入</button>
     <div id="status" class="status"></div>
 
     <p class="hint">
-      激活信息会保存在本地 <code>config.json</code>，仅用于连接 DeepSeek API。
+      激活信息会保存到本地 <code>config.json</code>，仅用于连接对应厂商的官方 API。
     </p>
   </main>
 
   <script>
     const ACTIVATION_WARMUP_KEY = 'bailongma_activation_warmup_until'
     const ACTIVATION_WARMUP_MS = 2500
-    const MODEL = 'deepseek-v4-flash'
     const apiKeyInput = document.getElementById('apiKey')
     const btn = document.getElementById('activate')
     const statusEl = document.getElementById('status')
@@ -181,13 +174,13 @@
       if (!apiKey) return
 
       btn.disabled = true
-      setStatus('正在验证 DeepSeek Key…')
+      setStatus('正在自动识别 API Key 所属厂商...')
 
       try {
         const resp = await fetch('/activate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apiKey, model: MODEL }),
+          body: JSON.stringify({ apiKey, provider: 'auto' }),
         })
         const data = await resp.json().catch(() => ({}))
         if (!resp.ok || !data.ok) {
@@ -200,7 +193,7 @@
           sessionStorage.setItem(ACTIVATION_WARMUP_KEY, String(Date.now() + ACTIVATION_WARMUP_MS))
         } catch {}
 
-        setStatus(`激活成功，已切换到 ${data.model}（思考模式）`, 'ok')
+        setStatus(`激活成功：${data.provider} · ${data.model}`, 'ok')
         setTimeout(() => window.location.replace('/brain-ui'), 700)
       } catch (err) {
         setStatus('网络错误：' + err.message, 'err')

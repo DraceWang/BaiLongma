@@ -12,7 +12,7 @@ import { getQuotaStatus } from './quota.js'
 import { isRunning, stopLoop, startLoop } from './control.js'
 import { buildHeartbeatSystemPromptPreview } from './system-prompt-preview.js'
 import { paths } from './paths.js'
-import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, DEEPSEEK_MODELS, MINIMAX_MODELS } from './config.js'
+import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries } from './config.js'
 import { streamTTS, TTS_PROVIDERS, TTS_VOICES } from './voice/tts-providers.js'
 import { restartConnector } from './social/index.js'
 import { replaceProvider } from './providers/registry.js'
@@ -681,10 +681,7 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
           models: status.models,
           temperature: config.temperature,
         },
-        providers: {
-          deepseek: { models: DEEPSEEK_MODELS },
-          minimax: { models: MINIMAX_MODELS },
-        },
+        providers: getProviderSummaries(),
         minimax: {
           configured: !!(globalThis.process?.env?.MINIMAX_API_KEY || minimaxKey),
         },

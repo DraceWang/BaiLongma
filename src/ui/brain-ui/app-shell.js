@@ -198,6 +198,7 @@ const createSettingsModal = () => `
             <div class="settings-row">
               <label class="settings-label" for="settings-provider-select">提供商</label>
               <select class="settings-select" id="settings-provider-select">
+                <option value="auto">自动识别</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="minimax">MiniMax</option>
               </select>

@@ -3,9 +3,17 @@ import { paths } from './paths.js'
 
 export const DEEPSEEK_PROVIDER = 'deepseek'
 export const MINIMAX_PROVIDER = 'minimax'
+export const OPENAI_PROVIDER = 'openai'
+export const QWEN_PROVIDER = 'qwen'
+export const MOONSHOT_PROVIDER = 'moonshot'
+export const ZHIPU_PROVIDER = 'zhipu'
 
 export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-flash'
 export const DEFAULT_MINIMAX_MODEL = 'MiniMax-M2.7'
+export const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
+export const DEFAULT_QWEN_MODEL = 'qwen-turbo'
+export const DEFAULT_MOONSHOT_MODEL = 'moonshot-v1-8k'
+export const DEFAULT_ZHIPU_MODEL = 'glm-4-flash'
 
 export const DEEPSEEK_MODELS = [
   {
@@ -43,20 +51,105 @@ export const MINIMAX_MODELS = [
   },
 ]
 
+export const OPENAI_MODELS = [
+  {
+    id: 'gpt-4o-mini',
+    label: 'gpt-4o-mini',
+    deprecated: false,
+  },
+  {
+    id: 'gpt-4o',
+    label: 'gpt-4o',
+    deprecated: false,
+  },
+]
+
+export const QWEN_MODELS = [
+  {
+    id: 'qwen-turbo',
+    label: 'qwen-turbo',
+    deprecated: false,
+  },
+  {
+    id: 'qwen-plus',
+    label: 'qwen-plus',
+    deprecated: false,
+  },
+]
+
+export const MOONSHOT_MODELS = [
+  {
+    id: 'moonshot-v1-8k',
+    label: 'moonshot-v1-8k',
+    deprecated: false,
+  },
+  {
+    id: 'moonshot-v1-32k',
+    label: 'moonshot-v1-32k',
+    deprecated: false,
+  },
+]
+
+export const ZHIPU_MODELS = [
+  {
+    id: 'glm-4-flash',
+    label: 'glm-4-flash',
+    deprecated: false,
+  },
+  {
+    id: 'glm-4-plus',
+    label: 'glm-4-plus',
+    deprecated: false,
+  },
+]
+
 const PROVIDER_CONFIG = {
   [DEEPSEEK_PROVIDER]: {
+    label: 'DeepSeek',
     baseURL: 'https://api.deepseek.com',
     envVar: 'DEEPSEEK_API_KEY',
     models: DEEPSEEK_MODELS,
     defaultModel: DEFAULT_DEEPSEEK_MODEL,
   },
   [MINIMAX_PROVIDER]: {
+    label: 'MiniMax',
     baseURL: 'https://api.minimax.chat/v1',
     envVar: 'MINIMAX_API_KEY',
     models: MINIMAX_MODELS,
     defaultModel: DEFAULT_MINIMAX_MODEL,
   },
+  [OPENAI_PROVIDER]: {
+    label: 'OpenAI',
+    baseURL: 'https://api.openai.com/v1',
+    envVar: 'OPENAI_API_KEY',
+    models: OPENAI_MODELS,
+    defaultModel: DEFAULT_OPENAI_MODEL,
+  },
+  [QWEN_PROVIDER]: {
+    label: 'Qwen',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    envVar: 'DASHSCOPE_API_KEY',
+    models: QWEN_MODELS,
+    defaultModel: DEFAULT_QWEN_MODEL,
+  },
+  [MOONSHOT_PROVIDER]: {
+    label: 'Moonshot',
+    baseURL: 'https://api.moonshot.cn/v1',
+    envVar: 'MOONSHOT_API_KEY',
+    models: MOONSHOT_MODELS,
+    defaultModel: DEFAULT_MOONSHOT_MODEL,
+  },
+  [ZHIPU_PROVIDER]: {
+    label: 'Zhipu',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    envVar: 'ZHIPU_API_KEY',
+    models: ZHIPU_MODELS,
+    defaultModel: DEFAULT_ZHIPU_MODEL,
+  },
 }
+
+const AUTO_PROVIDER = 'auto'
+const PROBE_TIMEOUT_MS = 12000
 
 function normalizeModel(model, provider = DEEPSEEK_PROVIDER) {
   const pConfig = PROVIDER_CONFIG[provider] || PROVIDER_CONFIG[DEEPSEEK_PROVIDER]
@@ -68,6 +161,77 @@ function normalizeModel(model, provider = DEEPSEEK_PROVIDER) {
 
 function isThinkingEnabledForModel(model) {
   return normalizeModel(model) !== 'deepseek-chat'
+}
+
+function getProvidersForAutoDetect() {
+  return Object.entries(PROVIDER_CONFIG)
+}
+
+function getProviderErrorMessage(err) {
+  const status = err?.status ?? err?.response?.status
+  const message = err?.message || String(err)
+  return status ? `${status} ${message}` : message
+}
+
+function withTimeout(promise, ms, label) {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+function buildPingParams(provider, model) {
+  const pingParams = {
+    model,
+    messages: [{ role: 'user', content: 'Reply with exactly: hello' }],
+    max_tokens: 8,
+    temperature: 0,
+    stream: false,
+  }
+  if (provider === DEEPSEEK_PROVIDER) {
+    pingParams.reasoning_effort = 'high'
+    pingParams.extra_body = {
+      thinking: { type: isThinkingEnabledForModel(model) ? 'enabled' : 'disabled' }
+    }
+  }
+  return pingParams
+}
+
+async function probeProvider(OpenAI, provider, apiKey, requestedModel) {
+  const pConfig = PROVIDER_CONFIG[provider]
+  const model = normalizeModel(requestedModel, provider)
+  const client = new OpenAI({
+    apiKey,
+    baseURL: pConfig.baseURL,
+    timeout: PROBE_TIMEOUT_MS,
+  })
+  await withTimeout(
+    client.chat.completions.create(buildPingParams(provider, model)),
+    PROBE_TIMEOUT_MS,
+    provider,
+  )
+  return { provider, model, pConfig }
+}
+
+async function detectProvider(OpenAI, apiKey, requestedModel) {
+  const providers = getProvidersForAutoDetect()
+  const errors = []
+
+  return await new Promise((resolve, reject) => {
+    let pending = providers.length
+    for (const [provider] of providers) {
+      probeProvider(OpenAI, provider, apiKey, requestedModel)
+        .then(resolve)
+        .catch((err) => {
+          errors.push(`${provider}: ${getProviderErrorMessage(err)}`)
+          pending -= 1
+          if (pending === 0) {
+            reject(new Error(`未识别出 API Key 所属厂商。已尝试: ${providers.map(([name]) => name).join(', ')}。最后错误: ${errors.slice(-3).join(' | ')}`))
+          }
+        })
+    }
+  })
 }
 
 function readStoredConfig() {
@@ -109,6 +273,17 @@ function loadFromEnv() {
       provider: MINIMAX_PROVIDER,
       apiKey: minimaxKey,
       model: normalizeModel(process.env.MINIMAX_MODEL, MINIMAX_PROVIDER),
+    }
+  }
+  for (const [provider, pConfig] of Object.entries(PROVIDER_CONFIG)) {
+    if (provider === DEEPSEEK_PROVIDER || provider === MINIMAX_PROVIDER) continue
+    const key = process.env[pConfig.envVar]
+    if (key) {
+      return {
+        provider,
+        apiKey: key,
+        model: normalizeModel(process.env[`${pConfig.envVar.replace(/_API_KEY$/, '')}_MODEL`], provider),
+      }
     }
   }
   return null
@@ -157,10 +332,10 @@ if (stored) {
   } catch {}
 })()
 
-export async function activate({ provider = DEEPSEEK_PROVIDER, apiKey, model }) {
-  const p = String(provider || DEEPSEEK_PROVIDER).toLowerCase()
+export async function activate({ provider = AUTO_PROVIDER, apiKey, model }) {
+  const p = String(provider || AUTO_PROVIDER).toLowerCase()
   const pConfig = PROVIDER_CONFIG[p]
-  if (!pConfig) {
+  if (p !== AUTO_PROVIDER && !pConfig) {
     throw new Error(`不支持的 provider: "${p}"，可选: ${Object.keys(PROVIDER_CONFIG).join(', ')}`)
   }
 
@@ -171,22 +346,30 @@ export async function activate({ provider = DEEPSEEK_PROVIDER, apiKey, model }) 
   }
 
   const { default: OpenAI } = await import('openai')
-  const client = new OpenAI({ apiKey: normalizedKey, baseURL: pConfig.baseURL })
+  if (p === AUTO_PROVIDER) {
+    const detected = await detectProvider(OpenAI, normalizedKey, model)
+    applyConfig(detected.provider, normalizedKey, detected.model)
+    writeStoredConfig({
+      provider: detected.provider,
+      apiKey: normalizedKey,
+      model: detected.model,
+      activatedAt: new Date().toISOString(),
+    })
+    return {
+      provider: detected.provider,
+      model: detected.model,
+      models: detected.pConfig.models,
+    }
+  }
+
+  const client = new OpenAI({ apiKey: normalizedKey, baseURL: pConfig.baseURL, timeout: PROBE_TIMEOUT_MS })
 
   try {
-    const pingParams = {
-      model: normalizedModel,
-      messages: [{ role: 'user', content: 'ping' }],
-      max_tokens: 1,
-      stream: false,
-    }
-    if (p === DEEPSEEK_PROVIDER) {
-      pingParams.reasoning_effort = 'high'
-      pingParams.extra_body = {
-        thinking: { type: isThinkingEnabledForModel(normalizedModel) ? 'enabled' : 'disabled' }
-      }
-    }
-    await client.chat.completions.create(pingParams)
+    await withTimeout(
+      client.chat.completions.create(buildPingParams(p, normalizedModel)),
+      PROBE_TIMEOUT_MS,
+      p,
+    )
   } catch (err) {
     const message = err?.message || String(err)
     if (/401|unauthoriz|invalid.*api.*key|authentication/i.test(message)) {
@@ -219,6 +402,17 @@ export function getActivationStatus() {
     models: pConfig ? pConfig.models : DEEPSEEK_MODELS,
     defaultModel: pConfig ? pConfig.defaultModel : DEFAULT_DEEPSEEK_MODEL,
   }
+}
+
+export function getProviderSummaries() {
+  return Object.fromEntries(Object.entries(PROVIDER_CONFIG).map(([name, pConfig]) => [
+    name,
+    {
+      label: pConfig.label || name,
+      models: pConfig.models,
+      defaultModel: pConfig.defaultModel,
+    },
+  ]))
 }
 
 export function deactivate() {
@@ -425,6 +619,11 @@ export function setTTSConfig(updates) {
 export const __internals = {
   DEEPSEEK_MODELS,
   MINIMAX_MODELS,
+  OPENAI_MODELS,
+  QWEN_MODELS,
+  MOONSHOT_MODELS,
+  ZHIPU_MODELS,
   normalizeModel,
   isThinkingEnabledForModel,
+  buildPingParams,
 }
