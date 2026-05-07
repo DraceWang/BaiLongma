@@ -5,7 +5,7 @@ import { initChat } from "./chat.js";
 import { initPanelCollapse } from "./panel-collapse.js";
 import { ThoughtStream } from "./thought-stream.js";
 import { initVoicePanel } from "./voice-panel.js";
-import { initHotspot, toggleHotspot } from "./hotspot.js";
+import { initHotspot, toggleHotspot, setHotspotMode, moveVoicePanelToBody, restoreVoicePanel } from "./hotspot.js";
 renderBrainUiApp(document.body);
 const THEME_KEY = "jarvis-brain-ui-theme";
 const PHYSICS_STORAGE_KEY = "jarvis-brain-ui-physics";
@@ -1223,6 +1223,9 @@ function handle({ type, data = {} }) {
     case "media_mode":
       window.dispatchEvent(new CustomEvent("bailongma:media", { detail: data }));
       break;
+    case "hotspot_mode":
+      setHotspotMode(!!data.active || data.action === "show" || data.action === "open", { source: "agent_event" });
+      break;
     case "social_status":
       window.dispatchEvent(new CustomEvent("bailongma:social_status", { detail: data }));
       break;
@@ -1251,7 +1254,11 @@ async function playTTSReply(text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      let errMsg = `HTTP ${resp.status}`;
+      try { const j = await resp.json(); errMsg = j.error || errMsg; } catch {}
+      throw new Error(errMsg);
+    }
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
     if (ttsAudioEl) { ttsAudioEl.pause(); URL.revokeObjectURL(ttsAudioEl.src); }
@@ -1316,6 +1323,15 @@ chat = initChat({
   activationWarmupKey: ACTIVATION_WARMUP_KEY,
   getAgentName: () => agentName,
   defaultInputPlaceholder,
+  onUserMessage: (text) => {
+    if (document.body.classList.contains('hotspot-mode') && /关闭|退出|关掉|隐藏/.test(text)) {
+      toggleHotspot();
+      return;
+    }
+    if (/热点|热搜/.test(text) && !document.body.classList.contains('hotspot-mode')) {
+      toggleHotspot();
+    }
+  },
 });
 chat.applyActivationWarmupLock();
 if (MEMORY_GRAPH_ENABLED) {
@@ -1336,13 +1352,16 @@ initPanelCollapse();
 
 // ── TTS 设置面板初始化 ────────────────────────────────────────────────────────
 function initTTSSettings() {
-  const providerSel  = document.getElementById("tts-provider-select");
-  const voiceIdInput = document.getElementById("tts-voice-id");
-  const testBtn      = document.getElementById("tts-test-btn");
-  const testStatus   = document.getElementById("tts-test-status");
+  const providerSel = document.getElementById("tts-provider-select");
+  const voiceSel    = document.getElementById("tts-voice-select");
+  const testBtn     = document.getElementById("tts-test-btn");
+  const testStatus  = document.getElementById("tts-test-status");
   if (!providerSel) return;
 
+  let allVoices = {};
+
   const credSections = {
+    doubao:     document.getElementById("tts-creds-doubao"),
     minimax:    document.getElementById("tts-creds-minimax"),
     openai:     document.getElementById("tts-creds-openai"),
     elevenlabs: document.getElementById("tts-creds-elevenlabs"),
@@ -1355,18 +1374,37 @@ function initTTSSettings() {
     });
   }
 
-  providerSel.addEventListener("change", () => showCredSection(providerSel.value));
+  function updateVoiceOptions(provider, savedId) {
+    if (!voiceSel) return;
+    const voices = allVoices[provider] || [];
+    voiceSel.innerHTML = voices.map(v =>
+      `<option value="${v.id}">${v.label}</option>`
+    ).join("");
+    if (savedId && voices.some(v => v.id === savedId)) {
+      voiceSel.value = savedId;
+    }
+  }
 
-  // 加载现有配置
-  fetch(`${API}/settings/tts`).then(r => r.json()).then(({ tts }) => {
-    if (!tts) return;
-    if (tts.ttsProvider) providerSel.value = tts.ttsProvider;
-    if (tts.ttsVoiceId) voiceIdInput.value = tts.ttsVoiceId;
+  providerSel.addEventListener("change", () => {
+    showCredSection(providerSel.value);
+    updateVoiceOptions(providerSel.value);
+  });
+
+  // 加载现有配置 + 声音列表
+  fetch(`${API}/settings/tts`).then(r => r.json()).then(({ tts, voices }) => {
+    if (voices) allVoices = voices;
+    const provider = tts?.ttsProvider || "minimax";
+    if (tts?.ttsProvider) providerSel.value = tts.ttsProvider;
+    updateVoiceOptions(provider, tts?.ttsVoiceId);
     const appidEl = document.getElementById("tts-volcano-appid");
-    if (appidEl && tts.volcanoAppId?.value) appidEl.value = tts.volcanoAppId.value;
+    if (appidEl && tts?.volcanoAppId?.value) appidEl.value = tts.volcanoAppId.value;
+    const doubaoAppIdEl = document.getElementById("tts-doubao-appid");
+    if (doubaoAppIdEl && tts?.doubaoAppId?.value) doubaoAppIdEl.value = tts.doubaoAppId.value;
+    const doubaoResourceEl = document.getElementById("tts-doubao-resource-id");
+    if (doubaoResourceEl && tts?.doubaoResourceId) doubaoResourceEl.value = tts.doubaoResourceId;
     const baseurlEl = document.getElementById("tts-openai-baseurl");
-    if (baseurlEl && tts.openaiTtsBaseURL) baseurlEl.value = tts.openaiTtsBaseURL;
-    showCredSection(tts.ttsProvider || "minimax");
+    if (baseurlEl && tts?.openaiTtsBaseURL) baseurlEl.value = tts.openaiTtsBaseURL;
+    showCredSection(provider);
   }).catch(() => {});
 
   showCredSection(providerSel.value);
@@ -1374,11 +1412,18 @@ function initTTSSettings() {
   // TTS 配置写入 saveVoiceBtn 的保存流程（通过独立请求）
   const origSaveBtn = document.getElementById("settings-save-voice");
   if (origSaveBtn) {
-    const origClick = origSaveBtn.onclick;
     origSaveBtn.addEventListener("click", () => {
       const ttsBody = { ttsProvider: providerSel.value };
-      const voiceId  = voiceIdInput?.value?.trim();
+      const voiceId  = voiceSel?.value?.trim();
       if (voiceId) ttsBody.ttsVoiceId = voiceId;
+      const doubaoKey = document.getElementById("tts-doubao-key")?.value?.trim();
+      if (doubaoKey) ttsBody.doubaoKey = doubaoKey;
+      const doubaoAppId = document.getElementById("tts-doubao-appid")?.value?.trim();
+      if (doubaoAppId) ttsBody.doubaoAppId = doubaoAppId;
+      const doubaoAccessKey = document.getElementById("tts-doubao-access-key")?.value?.trim();
+      if (doubaoAccessKey) ttsBody.doubaoAccessKey = doubaoAccessKey;
+      const doubaoResourceId = document.getElementById("tts-doubao-resource-id")?.value?.trim();
+      if (doubaoResourceId) ttsBody.doubaoResourceId = doubaoResourceId;
       const openaiKey = document.getElementById("tts-openai-key")?.value?.trim();
       if (openaiKey) ttsBody.openaiTtsKey = openaiKey;
       const baseURL = document.getElementById("tts-openai-baseurl")?.value?.trim();
@@ -1396,7 +1441,7 @@ function initTTSSettings() {
         body: JSON.stringify(ttsBody),
       }).then(() => {
         // 清空密钥输入框
-        ["tts-openai-key", "tts-elevenlabs-key", "tts-volcano-token"].forEach(id => {
+        ["tts-doubao-key", "tts-doubao-access-key", "tts-openai-key", "tts-elevenlabs-key", "tts-volcano-token"].forEach(id => {
           const el = document.getElementById(id);
           if (el) el.value = "";
         });
@@ -1404,17 +1449,44 @@ function initTTSSettings() {
     });
   }
 
-  // 试听按钮
+  // 试听按钮：先保存当前服务商+声音选择，再触发合成
   if (testBtn) {
     testBtn.addEventListener("click", async () => {
       testBtn.disabled = true;
-      if (testStatus) testStatus.textContent = "合成中…";
+      if (testStatus) testStatus.textContent = "保存配置中…";
       try {
+        // 先把当前 UI 的服务商+声音写入后端，确保试听用的是当前选择
+        const preBody = { ttsProvider: providerSel.value };
+        const currentVoice = voiceSel?.value?.trim();
+        if (currentVoice) preBody.ttsVoiceId = currentVoice;
+        // 也把当前表单里的密钥一并保存（如果有填）
+        const doubaoKey = document.getElementById("tts-doubao-key")?.value?.trim();
+        if (doubaoKey) preBody.doubaoKey = doubaoKey;
+        const doubaoAppId = document.getElementById("tts-doubao-appid")?.value?.trim();
+        if (doubaoAppId) preBody.doubaoAppId = doubaoAppId;
+        const doubaoAccessKey = document.getElementById("tts-doubao-access-key")?.value?.trim();
+        if (doubaoAccessKey) preBody.doubaoAccessKey = doubaoAccessKey;
+        const doubaoResourceId = document.getElementById("tts-doubao-resource-id")?.value?.trim();
+        if (doubaoResourceId) preBody.doubaoResourceId = doubaoResourceId;
+        const openaiKey = document.getElementById("tts-openai-key")?.value?.trim();
+        if (openaiKey) preBody.openaiTtsKey = openaiKey;
+        const elevenKey = document.getElementById("tts-elevenlabs-key")?.value?.trim();
+        if (elevenKey) preBody.elevenLabsKey = elevenKey;
+        const volcanoAppId = document.getElementById("tts-volcano-appid")?.value?.trim();
+        if (volcanoAppId) preBody.volcanoAppId = volcanoAppId;
+        const volcanoToken = document.getElementById("tts-volcano-token")?.value?.trim();
+        if (volcanoToken) preBody.volcanoToken = volcanoToken;
+        await fetch(`${API}/settings/tts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(preBody),
+        });
+        if (testStatus) testStatus.textContent = "合成中…";
         await playTTSReply("你好，这是语音合成测试，声音是否清晰自然？");
         if (testStatus) testStatus.textContent = "播放中";
         setTimeout(() => { if (testStatus) testStatus.textContent = ""; }, 4000);
       } catch {
-        if (testStatus) testStatus.textContent = "失败，请检查配置";
+        if (testStatus) testStatus.textContent = "失败，请检查配置和 API Key";
       } finally {
         testBtn.disabled = false;
       }
@@ -2147,6 +2219,8 @@ initHotspot().catch((err) => console.warn('[Hotspot] 初始化失败:', err));
     videoActive = Boolean(visible);
     document.body.classList.toggle("video-mode", videoActive);
     videoBtn?.classList.toggle("active", videoActive);
+    if (videoActive) moveVoicePanelToBody();
+    else restoreVoicePanel();
     window.dispatchEvent(new CustomEvent("bailongma:video-mode", {
       detail: { active: videoActive, kind: videoKind },
     }));

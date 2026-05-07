@@ -334,6 +334,22 @@ export const TOOL_SCHEMAS = {
     }
   },
 
+  hotspot_mode: {
+    type: 'function',
+    function: {
+      name: 'hotspot_mode',
+      description: '控制热点面板。只在用户明确要求、演示/演戏需要、或当前任务确实需要可视化热点现场时使用；普通问答不要主动打开。status 用于查看当前开关状态。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['show', 'open', 'hide', 'close', 'toggle', 'status'], description: 'show/open 打开热点面板；hide/close 关闭；toggle 切换；status 只查询状态' },
+          reason: { type: 'string', description: '简短说明为什么需要打开或关闭，可选' },
+        },
+        required: ['action']
+      }
+    }
+  },
+
   music: {
     type: 'function',
     function: {

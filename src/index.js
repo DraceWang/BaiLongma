@@ -21,6 +21,7 @@ import { ensureSkillMemories } from './memory/seed-skills.js'
 import { dispatchSocialMessage } from './social/dispatch.js'
 import { startSocialConnectors } from './social/index.js'
 import { stopVoiceServer } from './voice/manager.js'
+import { buildHotspotRuntimeContext, buildHotspotPanelStateContext } from './hotspots.js'
 
 // 首次启动时把资源目录里的 sandbox 种子文件拷到用户数据目录（Electron 安装场景）
 seedSandboxOnce()
@@ -448,6 +449,8 @@ async function process(input, label, msg = null) {
 
     // 用户实时消息走快速路径：跳过重型上下文采集，避免被任务背景拖慢。
     const prefetchText = formatPrefetchedItems(injection.prefetchedItems)
+    const hotspotStateText = buildHotspotPanelStateContext()
+    const hotspotContextText = buildHotspotRuntimeContext(msg?.content || input)
 
     let extraContextText = ''
     if (state.task && !fastUserPath) {
@@ -525,7 +528,7 @@ async function process(input, label, msg = null) {
       hasActiveTask,
       task: state.task || null,
       taskKnowledge: taskKnowledgeText,
-      extraContext: [prefetchText, extraContextText, injection.uiSignalSummary, formatActiveUICards(injection.activeUICards)].filter(Boolean).join('\n\n'),
+      extraContext: [hotspotStateText, hotspotContextText, prefetchText, extraContextText, injection.uiSignalSummary, formatActiveUICards(injection.activeUICards)].filter(Boolean).join('\n\n'),
       existenceDesc: describeExistence(birthTime),
     })
 

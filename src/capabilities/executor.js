@@ -11,6 +11,7 @@ import { dispatchSocialMessage } from '../social/dispatch.js'
 import { callCapability, listCapabilities } from '../providers/registry.js'
 import { isDailyLimitReached } from '../quota.js'
 import { setCustomInterval as setTickerInterval, getStatus as getTickerStatus } from '../ticker.js'
+import { setHotspotPanelState, getHotspotPanelState } from '../hotspots.js'
 
 // 后台进程注册表：pid → { process, command, startedAt }
 const bgProcesses = new Map()
@@ -139,6 +140,7 @@ const TOOL_RISK = {
   manage_app: 'medium',
   set_tick_interval: 'medium',
   media_mode: 'low',
+  hotspot_mode: 'low',
   music: 'low',
   delete_file: 'high',
   exec_command: 'high',
@@ -328,6 +330,8 @@ async function executeToolUnchecked(name, args, context = {}) {
         return execSetTickInterval(args)
       case 'media_mode':
         return execMediaMode(args)
+      case 'hotspot_mode':
+        return execHotspotMode(args)
       case 'music':
         return await execMusic(args)
       case 'schedule_reminder':
@@ -1528,7 +1532,7 @@ export function autoSpeakForVoiceReply(text) {
     // 列表型或超长：只播第一句 + 提示
     const sentenceEnd = plain.search(/[。！？!?]/)
     const firstSentence = sentenceEnd > 0 ? plain.slice(0, sentenceEnd + 1) : plain.slice(0, 60)
-    spoken = firstSentence.trim() + '，详情请看文字。'
+    spoken = firstSentence.trim()
   }
 
   emitEvent('tts_reply', { text: spoken })
@@ -1662,6 +1666,37 @@ function execMediaMode(args = {}) {
   emitEvent('media_mode', payload)
   emitEvent('action', { tool: 'media_mode', summary: `${mode}:${action}`, detail: payload.title || payload.url || '' })
   return JSON.stringify({ ok: true, tool: 'media_mode', ...payload })
+}
+
+function execHotspotMode(args = {}) {
+  const action = String(args.action || 'status').trim().toLowerCase()
+  if (!['show', 'open', 'hide', 'close', 'toggle', 'status'].includes(action)) {
+    return JSON.stringify({ ok: false, tool: 'hotspot_mode', error: 'unsupported action' })
+  }
+
+  let nextActive = null
+  if (action === 'show' || action === 'open') nextActive = true
+  if (action === 'hide' || action === 'close') nextActive = false
+  if (action === 'toggle') nextActive = !getHotspotPanelState().active
+
+  const state = typeof nextActive === 'boolean'
+    ? setHotspotPanelState({ active: nextActive, source: 'agent_tool' })
+    : getHotspotPanelState()
+
+  if (typeof nextActive === 'boolean') {
+    emitEvent('hotspot_mode', {
+      action: state.active ? 'show' : 'hide',
+      active: state.active,
+      reason: typeof args.reason === 'string' ? args.reason : '',
+    })
+    emitEvent('action', {
+      tool: 'hotspot_mode',
+      summary: state.active ? '打开热点面板' : '关闭热点面板',
+      detail: args.reason || '',
+    })
+  }
+
+  return JSON.stringify({ ok: true, tool: 'hotspot_mode', state })
 }
 
 // ── Music Library ─────────────────────────────────────────────────────────────

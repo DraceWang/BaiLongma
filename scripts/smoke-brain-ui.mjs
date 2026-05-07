@@ -100,6 +100,37 @@ function createServer() {
       return
     }
 
+    if (url.pathname === '/settings/tts') {
+      sendJson(res, {
+        ok: true,
+        tts: { ttsProvider: 'minimax', ttsVoiceId: 'male-qn-qingse' },
+        providers: [{ id: 'minimax', label: 'MiniMax', streaming: false }],
+        voices: { minimax: [{ id: 'male-qn-qingse', label: '青涩男声' }] },
+      })
+      return
+    }
+
+    if (url.pathname === '/hotspots') {
+      sendJson(res, {
+        ok: true,
+        refreshMinutes: 30,
+        fetchedAt: new Date().toISOString(),
+        stale: false,
+        platforms: {
+          douyin: [
+            { rank: 1, title: 'Smoke 热点一', heat: '100万', trend: 'same', isNew: false, source: 'smoke' },
+            { rank: 2, title: 'Smoke 热点二', heat: '80万', trend: 'same', isNew: true, source: 'smoke' },
+          ],
+        },
+      })
+      return
+    }
+
+    if (url.pathname === '/social/wechat-clawbot/qr') {
+      sendJson(res, { ok: true, qr: null, status: 'unavailable' })
+      return
+    }
+
     if (url.pathname === '/events') {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -142,11 +173,18 @@ const port = await listen(server)
 const baseUrl = `http://127.0.0.1:${port}`
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 840 } })
+await page.addInitScript(() => {
+  localStorage.setItem('bailongma-memory-graph-enabled', 'true')
+})
 const errors = []
 page.on('pageerror', err => errors.push(err.message))
 page.on('console', msg => {
   if (msg.text().includes('/acui') && msg.text().includes('WebSocket connection')) return
+  if (msg.text().includes('Failed to load resource: the server responded with a status of 404')) return
   if (msg.type() === 'error') errors.push(msg.text())
+})
+page.on('response', response => {
+  if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`)
 })
 
 try {

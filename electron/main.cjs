@@ -13,6 +13,7 @@ const { pathToFileURL } = require('url')
 const { autoUpdater } = require('electron-updater')
 
 const IS_DEV = !app.isPackaged
+const WINDOWS_APP_USER_MODEL_ID = 'com.xiaoyuanda.bailongma'
 const USER_DIR = app.getPath('userData')
 const CODE_ROOT = app.getAppPath()
 const RESOURCE_ROOT = CODE_ROOT
@@ -20,6 +21,10 @@ const BACKEND_ENTRY = path.join(CODE_ROOT, 'src', 'index.js')
 
 let mainWindow = null
 let backendPort = 0
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID)
+}
 
 function sendUpdaterStatus(payload = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -226,6 +231,7 @@ ipcMain.handle('updater:check-for-updates', async () => {
 app.on('second-instance', () => {
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
+  if (!mainWindow.isVisible()) mainWindow.show()
   mainWindow.focus()
 })
 

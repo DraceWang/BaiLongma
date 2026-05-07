@@ -2139,12 +2139,160 @@ body.hotspot-mode .hotspot-panel {
   border-color: var(--line-strong);
 }
 
+/* ── 热点面板启动序列：错峰故障闪动接入 ── */
+body.hotspot-mode .hotspot-panel.hs-booting .hs-header,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-stat,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-list-card,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-earth-container,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-center-aux,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-feed-bar,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-ticker-bar {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: hs-glitch-in 620ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+  animation-delay: var(--hs-boot-delay, 0ms);
+  will-change: transform, opacity, filter, clip-path;
+}
+
+body.hotspot-mode .hotspot-panel.hs-booting .hs-header { --hs-boot-delay: 40ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-stat:nth-child(1) { --hs-boot-delay: 130ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-stat:nth-child(2) { --hs-boot-delay: 180ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-stat:nth-child(3) { --hs-boot-delay: 230ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-stat:nth-child(4) { --hs-boot-delay: 280ms; }
+body.hotspot-mode .hotspot-panel.hs-booting #hs-douyin-card { --hs-boot-delay: 330ms; }
+body.hotspot-mode .hotspot-panel.hs-booting #hs-xhs-card { --hs-boot-delay: 430ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-earth-container { --hs-boot-delay: 500ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-center-aux { --hs-boot-delay: 660ms; }
+body.hotspot-mode .hotspot-panel.hs-booting #hs-wechat-card { --hs-boot-delay: 760ms; }
+body.hotspot-mode .hotspot-panel.hs-booting #hs-weibo-card { --hs-boot-delay: 860ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-feed-bar { --hs-boot-delay: 1000ms; }
+body.hotspot-mode .hotspot-panel.hs-booting .hs-ticker-bar { --hs-boot-delay: 1140ms; }
+
+body.hotspot-mode .hotspot-panel.hs-booting .hs-list-card,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-earth-container,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-aux-box,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-feed-card {
+  position: relative;
+}
+
+body.hotspot-mode .hotspot-panel.hs-booting .hs-list-card::after,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-earth-container::after,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-aux-box::after,
+body.hotspot-mode .hotspot-panel.hs-booting .hs-feed-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(120, 210, 255, 0.22) 48%, transparent 100%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 5px);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transform: translateX(-120%);
+  animation: hs-signal-sweep 560ms ease-out forwards;
+  animation-delay: calc(var(--hs-boot-delay, 0ms) + 80ms);
+}
+
+@keyframes hs-glitch-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) skewX(-0.8deg);
+    filter: brightness(1.9) contrast(1.35) saturate(0.6);
+    clip-path: inset(42% 0 44% 0);
+  }
+  14% {
+    opacity: 0.9;
+    transform: translateY(-1px) translateX(-3px);
+    filter: brightness(2.25) contrast(1.6) saturate(1.35);
+    clip-path: inset(0 0 72% 0);
+  }
+  22% {
+    opacity: 0.35;
+    transform: translateY(4px) translateX(3px);
+    clip-path: inset(66% 0 0 0);
+  }
+  34% {
+    opacity: 1;
+    transform: translateY(0) translateX(-1px);
+    filter: brightness(1.35) contrast(1.18) saturate(1.1);
+    clip-path: inset(0 0 0 0);
+  }
+  46% {
+    opacity: 0.72;
+    transform: translateY(1px);
+    filter: brightness(1.8) contrast(1.35);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes hs-signal-sweep {
+  0% { opacity: 0; transform: translateX(-120%); }
+  18% { opacity: 0.75; }
+  100% { opacity: 0; transform: translateX(120%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.hotspot-mode .hotspot-panel.hs-booting .hs-header,
+  body.hotspot-mode .hotspot-panel.hs-booting .hs-stat,
+  body.hotspot-mode .hotspot-panel.hs-booting .hs-list-card,
+  body.hotspot-mode .hotspot-panel.hs-booting .hs-earth-container,
+  body.hotspot-mode .hotspot-panel.hs-booting .hs-center-aux,
+  body.hotspot-mode .hotspot-panel.hs-booting .hs-feed-bar,
+  body.hotspot-mode .hotspot-panel.hs-booting .hs-ticker-bar {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+}
+
 /* ── 布局联动：聊天框挤到右侧 1/3 ── */
 body.hotspot-mode #panel-l1 { transform: translateX(calc(-100% - 20px)); }
 body.hotspot-mode #panel-l2 { transform: translateX(calc(100% + 20px)); }
 body.hotspot-mode .console  { left: calc(66vw + 8px); right: 16px; }
-body.hotspot-mode #graph    { transform: translateX(24vw); }
+body.hotspot-mode #graph    { transform: none; }
 body.hotspot-mode .panel-tab { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+
+/* ── 语音球悬浮：在热点/视频模式下移到对应聊天区顶部 ── */
+/* #voice-panel 被 JS 移到 body 根下，用 fixed 定位，不再受 panel transform 影响 */
+body.hotspot-mode > #voice-panel,
+body.video-mode   > #voice-panel {
+  position: fixed;
+  z-index: 300;
+  width: auto;
+  margin: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  top: 20px;
+  animation: none;
+}
+
+body.hotspot-mode > #voice-panel {
+  left: calc(66vw + 12px);
+  right: 20px;
+}
+
+body.video-mode > #voice-panel {
+  left: 20px;
+  right: calc(66vw + 12px);
+}
+
+body.hotspot-mode > #voice-panel #voice-canvas,
+body.video-mode   > #voice-panel #voice-canvas {
+  width: 56px !important;
+  flex-shrink: 0;
+}
 
 /* ── 顶部标题栏 ── */
 .hs-header {
@@ -2363,7 +2511,7 @@ body.hotspot-mode .panel-tab { opacity: 0; pointer-events: none; transition: opa
 .hs-dot-douyin   { background: #FE2C55; box-shadow: 0 0 6px #FE2C5588; }
 .hs-dot-xhs      { background: #FF2442; box-shadow: 0 0 6px #FF244288; }
 .hs-dot-wechat   { background: #07C160; box-shadow: 0 0 6px #07C16088; }
-.hs-dot-channels { background: #1989FA; box-shadow: 0 0 6px #1989FA88; }
+.hs-dot-weibo { background: #E6162D; box-shadow: 0 0 6px #E6162D88; }
 
 .hs-platform-name {
   font-size: 11px;

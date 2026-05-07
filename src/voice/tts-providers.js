@@ -1,16 +1,29 @@
 // 流式 TTS 服务商接入层
-// 支持: OpenAI TTS / ElevenLabs / 火山引擎
+// 支持: OpenAI TTS / ElevenLabs / 火山引擎 / 豆包（方舟）
 // 统一返回 Node.js Readable stream，供 api.js pipe 到 HTTP 响应
-import { Readable } from 'stream'
+import { Readable, Transform } from 'stream'
 
 export const TTS_PROVIDERS = [
+  { id: 'doubao',      label: '豆包（方舟）',   streaming: true  },
   { id: 'minimax',     label: 'MiniMax',       streaming: false },
-  { id: 'openai',      label: 'OpenAI TTS',   streaming: true },
-  { id: 'elevenlabs',  label: 'ElevenLabs',   streaming: true },
+  { id: 'openai',      label: 'OpenAI TTS',   streaming: true  },
+  { id: 'elevenlabs',  label: 'ElevenLabs',   streaming: true  },
   { id: 'volcano',     label: '火山引擎',       streaming: false },
 ]
 
 export const TTS_VOICES = {
+  doubao: [
+    { id: 'zh_female_xiaohe_uranus_bigtts',          label: '小何 2.0（女声，通用）' },
+    { id: 'zh_female_vv_uranus_bigtts',              label: 'Vivi 2.0（女声，通用/多语种）' },
+    { id: 'zh_female_shuangkuaisisi_uranus_bigtts',  label: '爽快思思 2.0（女声，活泼）' },
+    { id: 'zh_female_cancan_uranus_bigtts',          label: '知性灿灿 2.0（女声，角色）' },
+    { id: 'zh_female_tianmeixiaoyuan_uranus_bigtts', label: '甜美小源 2.0（女声，甜美）' },
+    { id: 'zh_male_m191_uranus_bigtts',              label: '云舟 2.0（男声，通用）' },
+    { id: 'zh_male_taocheng_uranus_bigtts',          label: '小天 2.0（男声，通用）' },
+    { id: 'zh_female_kefunvsheng_uranus_bigtts',     label: '暖阳女声 2.0（客服）' },
+    { id: 'en_female_dacey_uranus_bigtts',           label: 'Dacey（英语女声）' },
+    { id: 'en_male_tim_uranus_bigtts',               label: 'Tim（英语男声）' },
+  ],
   minimax: [
     { id: 'male-qn-qingse',    label: '青涩男声' },
     { id: 'male-qn-jingying',  label: '精英男声' },
@@ -51,6 +64,93 @@ export const TTS_VOICES = {
 // WHATWG ReadableStream (fetch response.body) → Node.js Readable
 function webStreamToNode(webStream) {
   return Readable.fromWeb(webStream)
+}
+
+// ── 豆包 TTS（豆包语音平台 V3 HTTP Chunked，语音合成2.0）─────────────────────
+// 文档: https://www.volcengine.com/docs/6561/1598757
+// 2.0 音色使用 *_uranus_bigtts；旧 moon/BV 音色自动降到 seed-tts-1.0。
+function resolveDoubaoResourceId(voiceId, resourceId) {
+  if (resourceId) return resourceId
+  if (/_moon_bigtts$/.test(voiceId) || /^BV\d+(_24k)?_streaming$/.test(voiceId)) return 'seed-tts-1.0'
+  return 'seed-tts-2.0'
+}
+
+function decodeDoubaoLine(transform, rawLine) {
+  const line = rawLine.trim().replace(/^data:\s*/, '')
+  if (!line || line === '[DONE]') return
+  if (!line.startsWith('{')) return
+  const data = JSON.parse(line)
+  const statusCode = Number(data.code ?? data.status_code ?? data.StatusCode ?? 0)
+  if (statusCode > 0 && statusCode !== 20000000) {
+    throw new Error(`豆包 TTS 流错误 (${statusCode}): ${data.message || data.status_text || '未知错误'}`)
+  }
+  if (data.data) transform.push(Buffer.from(data.data, 'base64'))
+}
+
+function decodeDoubaoStream(webStream) {
+  let pending = ''
+  return webStreamToNode(webStream).pipe(new Transform({
+    transform(chunk, _encoding, callback) {
+      pending += chunk.toString('utf-8')
+      const lines = pending.split(/\r?\n/)
+      pending = lines.pop() || ''
+      try {
+        for (const rawLine of lines) decodeDoubaoLine(this, rawLine)
+        callback()
+      } catch (err) {
+        callback(err)
+      }
+    },
+    flush(callback) {
+      try {
+        if (pending.trim()) decodeDoubaoLine(this, pending)
+        callback()
+      } catch (err) {
+        callback(err)
+      }
+    },
+  }))
+}
+
+async function streamDoubao({
+  text,
+  voiceId = 'zh_female_xiaohe_uranus_bigtts',
+  apiKey,
+  appId,
+  accessKey,
+  resourceId,
+}) {
+  const token = accessKey || apiKey
+  if (!token) throw new Error('豆包 TTS: 缺少 API Key/Access Key，请在设置中填写豆包语音凭证')
+  const speaker = voiceId || 'zh_female_xiaohe_uranus_bigtts'
+  const resolvedResourceId = resolveDoubaoResourceId(speaker, resourceId)
+  const headers = {
+    'X-Api-Resource-Id': resolvedResourceId,
+    'X-Api-Request-Id': `blm_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    'Content-Type': 'application/json',
+  }
+  if (appId) headers['X-Api-App-Id'] = appId
+  if (accessKey) headers['X-Api-Access-Key'] = accessKey
+  if (apiKey) headers['X-Api-Key'] = apiKey
+  const resp = await fetch('https://openspeech.bytedance.com/api/v3/tts/unidirectional', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      user: { uid: 'bailongma' },
+      req_params: {
+        text,
+        speaker,
+        audio_params: { format: 'mp3', sample_rate: 24000 },
+      },
+    }),
+  })
+  if (!resp.ok) {
+    const err = await resp.text()
+    throw new Error(`豆包 TTS 失败 (${resp.status}): ${err.slice(0, 300)}`)
+  }
+  const contentType = resp.headers.get('content-type') || ''
+  if (contentType.includes('audio/')) return webStreamToNode(resp.body)
+  return decodeDoubaoStream(resp.body)
 }
 
 // ── MiniMax TTS ────────────────────────────────────────────────────────────
@@ -179,6 +279,15 @@ async function streamVolcano({ text, voiceId = 'BV001_streaming', appId, token }
 export async function streamTTS({ text, provider, voiceId, keys = {} }) {
   if (!text?.trim()) throw new Error('TTS: 文本为空')
   switch (provider) {
+    case 'doubao':
+      return streamDoubao({
+        text,
+        voiceId,
+        apiKey: keys.doubaoKey,
+        appId: keys.doubaoAppId,
+        accessKey: keys.doubaoAccessKey,
+        resourceId: keys.doubaoResourceId,
+      })
     case 'minimax':
       return streamMiniMax({ text, voiceId, apiKey: keys.minimaxKey })
     case 'openai':

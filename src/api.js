@@ -22,6 +22,7 @@ import { handleSocialWebhook, isSocialWebhookPath } from './social/webhooks.js'
 import { getClawbotQR, logoutClawbot } from './social/wechat-clawbot.js'
 import { startVoiceServer, stopVoiceServer, getVoiceStatus, restartVoiceServer } from './voice/manager.js'
 import { createCloudASRSession } from './voice/cloud-asr.js'
+import { getHotspots, setHotspotPanelState, getHotspotPanelState } from './hotspots.js'
 
 export { emitEvent }
 
@@ -149,6 +150,22 @@ function isPathInside(parentDir, candidatePath) {
 function jsonResponse(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', chunk => chunks.push(chunk))
+    req.on('end', () => {
+      try {
+        const raw = Buffer.concat(chunks).toString('utf-8')
+        resolve(raw ? JSON.parse(raw) : {})
+      } catch (err) {
+        reject(err)
+      }
+    })
+    req.on('error', reject)
+  })
 }
 
 function contentTypeFor(filePath) {
@@ -445,6 +462,41 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
     if (req.method === 'GET' && url.pathname === '/quota') {
       jsonResponse(res, 200, getQuotaStatus())
       return
+    }
+
+    // GET /hotspots — 统一热点数据，默认 30 分钟缓存
+    if (req.method === 'GET' && url.pathname === '/hotspots') {
+      getHotspots({
+        force: /^(1|true|yes)$/i.test(url.searchParams.get('refresh') || ''),
+        viewed: /^(1|true|yes)$/i.test(url.searchParams.get('viewed') || ''),
+      })
+        .then((hotspots) => jsonResponse(res, 200, hotspots))
+        .catch((err) => jsonResponse(res, 502, {
+          ok: false,
+          error: err.message,
+          refreshMinutes: 30,
+          platforms: {},
+        }))
+      return
+    }
+
+    if (url.pathname === '/hotspot-state') {
+      if (req.method === 'GET') {
+        jsonResponse(res, 200, { ok: true, state: getHotspotPanelState() })
+        return
+      }
+      if (req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => {
+            const active = typeof body.active === 'boolean'
+              ? body.active
+              : /^(1|true|yes|open|show)$/i.test(String(body.active || ''))
+            const state = setHotspotPanelState({ active, source: body.source || 'brain-ui' })
+            jsonResponse(res, 200, { ok: true, state })
+          })
+          .catch((err) => jsonResponse(res, 400, { ok: false, error: err.message }))
+        return
+      }
     }
 
     if (req.method === 'GET' && url.pathname === '/system-prompt-preview') {
@@ -1035,6 +1087,10 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
             provider: creds.provider,
             voiceId:  body.voiceId || creds.voiceId || undefined,
             keys: {
+              doubaoKey:     creds.doubaoKey,
+              doubaoAppId:   creds.doubaoAppId,
+              doubaoAccessKey: creds.doubaoAccessKey,
+              doubaoResourceId: creds.doubaoResourceId,
               minimaxKey:    creds.minimaxKey,
               openaiKey:     creds.openaiKey,
               openaiBaseURL: creds.openaiBaseURL,

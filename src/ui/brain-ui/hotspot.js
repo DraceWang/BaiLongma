@@ -1,60 +1,23 @@
-// 热点模式主逻辑 — 切换、模拟数据、时钟、实时流
+// 热点模式主逻辑 — 切换、热点数据、时钟、实时流
 
+import { apiUrl } from './api-client.js';
 import { HotspotEarth } from './hotspot-earth.js';
 
-// ── 模拟数据 ──────────────────────────────────────────────────────────────────
+// ── 实时热点数据由后端 /hotspots 提供；前端不再用 mock 冒充真实热榜 ─────────────
 
-const MOCK_DOUYIN = [
-  { rank:1,  text:'四川宜宾地震现场实拍',   heat:'1892万', trend:'up',   isNew:false },
-  { rank:2,  text:'奥运圣火传递沿线盛况',   heat:'1456万', trend:'up',   isNew:false },
-  { rank:3,  text:'AI换脸技术有多道真',     heat:'1234万', trend:'down', isNew:false },
-  { rank:4,  text:'暴雨中的暖心一幕',       heat:'988万',  trend:'up',   isNew:false },
-  { rank:5,  text:'特斯拉召回主发声',       heat:'876万',  trend:'same', isNew:false },
-  { rank:6,  text:'夏日必去避暑目的地',     heat:'754万',  trend:'up',   isNew:false },
-  { rank:7,  text:'神舟十八号发射回顾',     heat:'698万',  trend:'up',   isNew:true  },
-  { rank:8,  text:'00后整顿职场名场面',     heat:'612万',  trend:'down', isNew:false },
-  { rank:9,  text:'宠物猫日常搞笑瞬间',    heat:'534万',  trend:'same', isNew:false },
-  { rank:10, text:'国漫新番口碑炸裂',      heat:'476万',  trend:'up',   isNew:false },
-];
+const PLATFORM_CONFIG = {
+  douyin: { listId: 'hs-douyin-list', updateId: 'hs-douyin-update', style: 'heat', label: '抖音' },
+  xiaohongshu: { listId: 'hs-xhs-list', updateId: 'hs-xhs-update', style: 'heat', label: '小红书' },
+  wechat: { listId: 'hs-wechat-list', updateId: 'hs-wechat-update', style: 'label', label: '微信热点' },
+  weibo: { listId: 'hs-weibo-list', updateId: 'hs-weibo-update', style: 'heat', label: '微博' },
+};
 
-const MOCK_XHS = [
-  { rank:1,  text:'宜宾地震应急避险指南',  heat:'89万',  trend:'up',   isNew:false },
-  { rank:2,  text:'夏天防晒实测报告',      heat:'76万',  trend:'up',   isNew:false },
-  { rank:3,  text:'巴黎奥运开幕式穿搭',    heat:'68万',  trend:'up',   isNew:true  },
-  { rank:4,  text:'台风来袭家庭备灾清单',  heat:'61万',  trend:'up',   isNew:false },
-  { rank:5,  text:'平价好用护肤品合集',    heat:'57万',  trend:'same', isNew:false },
-  { rank:6,  text:'神舟十八太空生活vlog',  heat:'52万',  trend:'up',   isNew:true  },
-  { rank:7,  text:'毕业旅行最美目的地',    heat:'48万',  trend:'down', isNew:false },
-  { rank:8,  text:'AI工具实测大合集',      heat:'44万',  trend:'same', isNew:false },
-  { rank:9,  text:'下半年读书计划分享',    heat:'39万',  trend:'up',   isNew:false },
-  { rank:10, text:'国产手机拍照横评',      heat:'35万',  trend:'down', isNew:false },
-];
-
-const MOCK_WECHAT = [
-  { rank:1,  text:'四川宜宾发生6.0级地震',          heat:'深度解析', trend:'up',   isNew:false },
-  { rank:2,  text:'特斯拉召回事件深度解析',         heat:'深度解析', trend:'down', isNew:false },
-  { rank:3,  text:'宏观经济半年报告解读',           heat:'独家',    trend:'up',   isNew:false },
-  { rank:4,  text:'巴黎奥运看点前瞻',              heat:'特稿',    trend:'up',   isNew:false },
-  { rank:5,  text:'台风来袭如何科学防范',           heat:'科普',    trend:'up',   isNew:false },
-  { rank:6,  text:'华为新芯片技术全解析',           heat:'深度',    trend:'up',   isNew:true  },
-  { rank:7,  text:'下半年投资机会展望',             heat:'研报',    trend:'same', isNew:false },
-  { rank:8,  text:'教育改革最新政策解读',           heat:'政策',    trend:'down', isNew:false },
-  { rank:9,  text:'居民消费数据趋势分析',           heat:'数据',    trend:'up',   isNew:false },
-  { rank:10, text:'神舟十八任务意义',              heat:'科技',    trend:'up',   isNew:true  },
-];
-
-const MOCK_CHANNELS = [
-  { rank:1,  text:'四川宜宾地震科普与避险',     heat:'876万', trend:'up',   isNew:false },
-  { rank:2,  text:'奥运开幕式全程回顾',         heat:'712万', trend:'up',   isNew:false },
-  { rank:3,  text:'特斯拉召回事件时间线',       heat:'598万', trend:'down', isNew:false },
-  { rank:4,  text:'AI工具实测合集2024',        heat:'534万', trend:'same', isNew:false },
-  { rank:5,  text:'暴雨救援现场记录',          heat:'487万', trend:'up',   isNew:false },
-  { rank:6,  text:'神舟十八发射全程',          heat:'445万', trend:'up',   isNew:true  },
-  { rank:7,  text:'游戏新作实机演示',          heat:'398万', trend:'down', isNew:false },
-  { rank:8,  text:'考研人数再创新高',          heat:'356万', trend:'up',   isNew:false },
-  { rank:9,  text:'国漫崛起之路',             heat:'312万', trend:'same', isNew:false },
-  { rank:10, text:'科技巨头财报对比',          heat:'278万', trend:'down', isNew:false },
-];
+const hotspotLists = {
+  douyin: [],
+  xiaohongshu: [],
+  wechat: [],
+  weibo: [],
+};
 
 // 实时事件流卡片
 const MOCK_FEED = [
@@ -80,13 +43,79 @@ const TICKER_ITEMS = [
   { time:'19:13', text:'研究显示：今夏北半球平均气温创历史新高' },
 ];
 
+// ── 热点上下文构建（中性系统上下文，不强制 Agent 回复）──────────────────────────
+
+let hotspotMeta = {
+  source: 'loading',
+  fetchedAt: null,
+  stale: true,
+  refreshMinutes: 30,
+  status: {},
+};
+
+export function buildHotspotContext() {
+  const top = (arr, n) => arr.slice(0, n).map((i, idx) => `${idx + 1}. ${i.text}`).join('；');
+  const feedTop = MOCK_FEED.slice(0, 3).map(i => `[${i.cat}] ${i.title}`).join('；');
+  const platformText = Object.entries(PLATFORM_CONFIG)
+    .map(([platform, config]) => {
+      const items = hotspotLists[platform] || [];
+      if (!items.length) return '';
+      return `${config.label} Top3：${top(items, 3)}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+  const sourceText = `当前热榜来源：后端实时数据，抓取时间：${formatFetchedAt(hotspotMeta.fetchedAt)}${hotspotMeta.stale ? '（缓存数据）' : ''}`;
+  return `## 热点上下文
+来源：热点模式界面，系统自动采集。发送者：SYSTEM。用途：提供当前环境背景，不代表用户请求。
+
+用户当前打开了热点面板。以下热点只作为上下文参考，不要求主动总结，不要把它当成用户消息，也不要因为它单独回复用户。
+
+只有在满足任一条件时才可主动提及：
+- 热点与用户当前问题、任务或正在讨论的话题直接相关；
+- 热点包含明显需要用户注意的紧急风险、重大变化或高优先级信息；
+- 用户明确询问“热点”“热搜”“现在发生什么”等内容。
+
+${sourceText}
+
+${platformText || '当前暂无可用实时热榜。'}
+实时事件 Top3：${feedTop}`;
+}
+
 // ── 状态 ──────────────────────────────────────────────────────────────────────
 
 let hotspotActive = false;
 let earth         = null;
 let clockTimer    = null;
 let feedAutoTimer = null;
+let hotspotRefreshTimer = null;
 let feedIndex     = 0;
+
+// ── 语音球搬家：从 #panel-l1(有 transform)移到 body，让 fixed 定位生效 ────────
+
+function moveVoicePanelToBody() {
+  const vp = document.getElementById('voice-panel');
+  if (!vp || vp.dataset.vpMoved) return;
+  vp._vpParent  = vp.parentElement;
+  vp._vpSibling = vp.nextElementSibling;
+  vp.dataset.vpMoved = '1';
+  document.body.appendChild(vp);
+}
+
+function restoreVoicePanel() {
+  const vp = document.getElementById('voice-panel');
+  if (!vp || !vp.dataset.vpMoved) return;
+  const parent  = vp._vpParent;
+  const sibling = vp._vpSibling;
+  if (parent) {
+    if (sibling && sibling.parentElement === parent) parent.insertBefore(vp, sibling);
+    else parent.appendChild(vp);
+  }
+  delete vp.dataset.vpMoved;
+  delete vp._vpParent;
+  delete vp._vpSibling;
+}
+
+export { moveVoicePanelToBody, restoreVoicePanel };
 
 // ── DOM 工具 ──────────────────────────────────────────────────────────────────
 
@@ -100,6 +129,15 @@ const TREND_CLASSES = { up: 'hs-trend-up', down: 'hs-trend-dn', same: 'hs-trend-
 function renderList(listId, items, style = 'heat') {
   const ul = $(listId);
   if (!ul) return;
+  if (!items.length) {
+    ul.innerHTML = `<li class="hs-item hs-item-empty">
+      <span class="hs-rank">--</span>
+      <span class="hs-item-text">实时源未配置或暂不可用</span>
+      <span class="hs-heat">--</span>
+      <span class="hs-trend hs-trend-same">—</span>
+    </li>`;
+    return;
+  }
   ul.innerHTML = items.map(({ rank, text, heat, trend, isNew }) => {
     const rankCls = rank <= 3 ? `hs-rank-top${rank}` : '';
     const trendIcon = TREND_ICONS[trend] || '';
@@ -118,10 +156,94 @@ function renderList(listId, items, style = 'heat') {
 }
 
 function renderAllLists() {
-  renderList('hs-douyin-list',   MOCK_DOUYIN,   'heat');
-  renderList('hs-xhs-list',      MOCK_XHS,      'heat');
-  renderList('hs-wechat-list',   MOCK_WECHAT,   'label');
-  renderList('hs-channels-list', MOCK_CHANNELS, 'heat');
+  for (const [platform, config] of Object.entries(PLATFORM_CONFIG)) {
+    renderList(config.listId, hotspotLists[platform] || [], config.style);
+  }
+}
+
+function formatFetchedAt(value) {
+  if (!value) return '未知';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '未知';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function normalizeHotspotItem(item, idx) {
+  const text = item?.text || item?.title || item?.word || '';
+  return {
+    rank: Number(item?.rank || idx + 1),
+    text,
+    heat: item?.heat || '',
+    trend: item?.trend || 'same',
+    isNew: !!item?.isNew,
+  };
+}
+
+function setText(id, text) {
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function updateHotspotMeta() {
+  let total = 0;
+  for (const [platform, config] of Object.entries(PLATFORM_CONFIG)) {
+    const items = hotspotLists[platform] || [];
+    const status = hotspotMeta.status?.[platform] || {};
+    total += items.length;
+    const source = status.ok
+      ? `${status.source || '实时'}${hotspotMeta.stale ? '缓存' : '数据'}`
+      : '未配置';
+    setText(config.updateId, `${source} · ${formatFetchedAt(hotspotMeta.fetchedAt)}`);
+  }
+  setText('hs-stat-data', String(total));
+  setText('hs-stat-data-delta', `四平台热榜 / ${hotspotMeta.refreshMinutes || 30} 分钟缓存`);
+}
+
+async function refreshHotspots({ force = false } = {}) {
+  try {
+    const params = new URLSearchParams();
+    if (force) params.set('refresh', '1');
+    if (hotspotActive) params.set('viewed', '1');
+    const query = params.toString();
+    const res = await fetch(apiUrl(`/hotspots${query ? `?${query}` : ''}`));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    for (const platform of Object.keys(PLATFORM_CONFIG)) {
+      const list = data?.platforms?.[platform] || [];
+      hotspotLists[platform] = Array.isArray(list)
+        ? list.map(normalizeHotspotItem).filter(item => item.text).slice(0, 10)
+        : [];
+    }
+    hotspotMeta = {
+      source: 'hotspot-api',
+      fetchedAt: data.fetchedAt,
+      stale: !!data.stale,
+      refreshMinutes: data.refreshMinutes || 30,
+      status: data.status || {},
+    };
+    renderAllLists();
+    updateHotspotMeta();
+  } catch (err) {
+    hotspotMeta = {
+      ...hotspotMeta,
+      stale: true,
+    };
+    updateHotspotMeta();
+    console.warn('[Hotspot] 热榜刷新失败:', err.message);
+  }
+}
+
+function startHotspotRefresh() {
+  if (hotspotRefreshTimer) clearInterval(hotspotRefreshTimer);
+  hotspotRefreshTimer = setInterval(() => {
+    refreshHotspots().catch(() => {});
+  }, (hotspotMeta.refreshMinutes || 30) * 60 * 1000);
+}
+
+function stopHotspotRefresh() {
+  if (hotspotRefreshTimer) clearInterval(hotspotRefreshTimer);
+  hotspotRefreshTimer = null;
 }
 
 // ── 实时事件流 ───────────────────────────────────────────────────────────────
@@ -206,11 +328,28 @@ function stopClock() {
   clockTimer = null;
 }
 
+function replayHotspotBoot() {
+  const panel = $('hotspot-panel');
+  if (!panel) return;
+  panel.classList.remove('hs-booting');
+  void panel.offsetWidth;
+  panel.classList.add('hs-booting');
+}
+
 // ── 模式切换 ─────────────────────────────────────────────────────────────────
 
-function setPanelVisible(visible) {
+function reportHotspotState(visible, source = 'brain-ui') {
+  fetch(apiUrl('/hotspot-state'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active: !!visible, source }),
+  }).catch(() => {});
+}
+
+function setPanelVisible(visible, source = 'brain-ui') {
   hotspotActive = visible;
   document.body.classList.toggle('hotspot-mode', visible);
+  if (!visible) $('hotspot-panel')?.classList.remove('hs-booting');
 
   const btn = document.getElementById('hotspot-btn');
   if (btn) btn.classList.toggle('active', visible);
@@ -218,13 +357,22 @@ function setPanelVisible(visible) {
   window.dispatchEvent(new CustomEvent('bailongma:hotspot-mode', {
     detail: { active: visible },
   }));
+  reportHotspotState(visible, source);
 }
 
-export function toggleHotspot() {
-  if (hotspotActive) {
-    setPanelVisible(false);
+export function setHotspotMode(visible, { source = 'brain-ui' } = {}) {
+  const nextVisible = !!visible;
+  if (hotspotActive === nextVisible) {
+    reportHotspotState(nextVisible, source);
+    return;
+  }
+
+  if (!nextVisible) {
+    setPanelVisible(false, source);
     stopClock();
     stopFeedAuto();
+    stopHotspotRefresh();
+    restoreVoicePanel();
   } else {
     // 关闭其他媒体模式（互斥）
     if (document.body.classList.contains('video-mode'))
@@ -234,9 +382,13 @@ export function toggleHotspot() {
     if (document.body.classList.contains('music-mode'))
       document.body.classList.remove('music-mode');
 
-    setPanelVisible(true);
+    setPanelVisible(true, source);
+    replayHotspotBoot();
     startClock();
     startFeedAuto();
+    startHotspotRefresh();
+    refreshHotspots().catch(() => {});
+    moveVoicePanelToBody();
 
     // 触发地球入场动画
     if (earth) {
@@ -245,13 +397,19 @@ export function toggleHotspot() {
   }
 }
 
+export function toggleHotspot(source = 'brain-ui') {
+  setHotspotMode(!hotspotActive, { source });
+}
+
 // ── 初始化 ───────────────────────────────────────────────────────────────────
 
 export async function initHotspot() {
   // 填充静态内容
   renderAllLists();
+  updateHotspotMeta();
   renderFeed();
   renderTicker();
+  refreshHotspots().catch(() => {});
 
   // 绑定关闭按钮
   const exitBtn = $('hs-exit-btn');

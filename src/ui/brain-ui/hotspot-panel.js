@@ -147,11 +147,11 @@ export const createHotspotPanel = () => `
     <!-- 右柱 -->
     <div class="hs-col hs-col-right">
 
-      <!-- 公众号热榜 -->
+      <!-- 微信热点榜 -->
       <div class="hs-list-card" id="hs-wechat-card">
         <div class="hs-card-header">
           <span class="hs-platform-dot hs-dot-wechat"></span>
-          <span class="hs-platform-name">公众号</span>
+          <span class="hs-platform-name">微信热点</span>
           <span class="hs-card-badge">热点榜</span>
           <span class="hs-card-update" id="hs-wechat-update">刚刚更新</span>
         </div>
@@ -160,15 +160,15 @@ export const createHotspotPanel = () => `
         </ul>
       </div>
 
-      <!-- 视频号热榜 -->
-      <div class="hs-list-card" id="hs-channels-card">
+      <!-- 微博热榜 -->
+      <div class="hs-list-card" id="hs-weibo-card">
         <div class="hs-card-header">
-          <span class="hs-platform-dot hs-dot-channels"></span>
-          <span class="hs-platform-name">视频号</span>
-          <span class="hs-card-badge">热点榜</span>
-          <span class="hs-card-update" id="hs-channels-update">刚刚更新</span>
+          <span class="hs-platform-dot hs-dot-weibo"></span>
+          <span class="hs-platform-name">微博</span>
+          <span class="hs-card-badge">热搜榜</span>
+          <span class="hs-card-update" id="hs-weibo-update">刚刚更新</span>
         </div>
-        <ul class="hs-list" id="hs-channels-list">
+        <ul class="hs-list" id="hs-weibo-list">
           <!-- JS 动态填充 -->
         </ul>
       </div>

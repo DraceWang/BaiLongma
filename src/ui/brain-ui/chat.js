@@ -6,6 +6,7 @@ export function initChat({
   activationWarmupKey,
   getAgentName,
   defaultInputPlaceholder,
+  onUserMessage = null,
 } = {}) {
   const chatHistory = document.getElementById("chat-history");
   const chatMessages = document.getElementById("chat-messages");
@@ -202,12 +203,16 @@ export function initChat({
     const text = msgInput.value.trim();
     if (!text) return;
     msgInput.value = "";
+    // onUserMessage 返回字符串则用作后端 payload；返回 false 则不发后端
+    const override = onUserMessage?.(text);
     addMsg("user", text, { label: label || undefined });
     openChat();
     scheduleClose(1000);
+    if (override === false) return;
 
     try {
-      const payload = { content: text, from_id: "ID:000001" };
+      const backendText = (typeof override === "string") ? override : text;
+      const payload = { content: backendText, from_id: "ID:000001" };
       if (channel) payload.channel = channel;
       await fetch(`${apiBase}/message`, {
         method: "POST",

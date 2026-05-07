@@ -439,15 +439,36 @@ const createSettingsModal = () => `
             <div class="settings-row">
               <label class="settings-label" for="tts-provider-select">服务商</label>
               <select class="settings-select" id="tts-provider-select">
+                <option value="doubao">豆包（方舟，流式，中文最自然）</option>
                 <option value="openai">OpenAI TTS（流式，$0.015/千字）</option>
                 <option value="elevenlabs">ElevenLabs（流式，高质量）</option>
-                <option value="volcano">火山引擎（中文最佳，有免费额度）</option>
+                <option value="volcano">火山引擎（中文，有免费额度）</option>
                 <option value="minimax">MiniMax（已有配置）</option>
               </select>
             </div>
             <div class="settings-row">
-              <label class="settings-label" for="tts-voice-id">声音 ID</label>
-              <input class="settings-input" type="text" id="tts-voice-id" placeholder="留空使用默认声音">
+              <label class="settings-label" for="tts-voice-select">声音</label>
+              <select class="settings-select" id="tts-voice-select"></select>
+            </div>
+
+            <div id="tts-creds-doubao" style="display:none;">
+              <div class="settings-row">
+                <label class="settings-label" for="tts-doubao-appid">豆包 App ID</label>
+                <input class="settings-input" type="text" id="tts-doubao-appid" placeholder="留空则不修改">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="tts-doubao-access-key">Access Key / Token</label>
+                <input class="settings-input" type="password" id="tts-doubao-access-key" placeholder="留空则不修改">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="tts-doubao-resource-id">Resource ID</label>
+                <input class="settings-input" type="text" id="tts-doubao-resource-id" placeholder="留空自动匹配 seed-tts-2.0">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="tts-doubao-key">API Key（兼容旧配置）</label>
+                <input class="settings-input" type="password" id="tts-doubao-key" placeholder="留空则不修改">
+              </div>
+              <p class="settings-hint">在<a href="https://console.volcengine.com/speech/app" target="_blank" style="color:var(--cool)">豆包语音控制台</a>获取 App ID 和 Access Token。2.0 音色默认使用 seed-tts-2.0。</p>
             </div>
 
             <div id="tts-creds-minimax" style="display:none;">

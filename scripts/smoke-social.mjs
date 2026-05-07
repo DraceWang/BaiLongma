@@ -4,7 +4,9 @@ import { startAPI } from '../src/api.js'
 import { popMessage } from '../src/queue.js'
 
 const port = 39000 + Math.floor(Math.random() * 1000)
+process.env.FEISHU_VERIFICATION_TOKEN = 'smoke-feishu-token'
 process.env.WECHAT_OFFICIAL_TOKEN = 'smoke-token'
+process.env.WECOM_INCOMING_TOKEN = 'smoke-wecom-token'
 
 const server = startAPI(port)
 const base = `http://127.0.0.1:${port}`
@@ -22,11 +24,15 @@ function wechatSignature(timestamp, nonce) {
 }
 
 try {
-  const challenge = await postJson('/social/feishu/webhook', { challenge: 'ok-challenge' }).then(r => r.json())
+  const challenge = await postJson('/social/feishu/webhook', {
+    challenge: 'ok-challenge',
+    token: 'smoke-feishu-token',
+  }).then(r => r.json())
   if (challenge.challenge !== 'ok-challenge') throw new Error('Feishu challenge failed')
 
   await postJson('/social/feishu/webhook', {
     header: { event_type: 'im.message.receive_v1' },
+    token: 'smoke-feishu-token',
     event: {
       sender: { sender_id: { open_id: 'ou_smoke' } },
       message: { chat_id: 'oc_smoke', message_id: 'om_smoke', content: JSON.stringify({ text: 'hello feishu' }) },
@@ -35,7 +41,7 @@ try {
   const feishuMsg = popMessage()
   if (feishuMsg?.fromId !== 'feishu:open_id:ou_smoke' || feishuMsg?.content !== 'hello feishu') throw new Error('Feishu message enqueue failed')
 
-  const ts = '12345'
+  const ts = String(Math.floor(Date.now() / 1000))
   const nonce = 'abc'
   const sig = wechatSignature(ts, nonce)
   const echo = await fetch(`${base}/social/wechat/official?signature=${sig}&timestamp=${ts}&nonce=${nonce}&echostr=echo-ok`).then(r => r.text())
@@ -49,7 +55,11 @@ try {
   const wechatMsg = popMessage()
   if (wechatMsg?.fromId !== 'wechat:official:from_openid' || wechatMsg?.content !== 'hello wechat') throw new Error('WeChat message enqueue failed')
 
-  await postJson('/social/wecom/webhook', { from_id: 'wecom:webhook:default', content: 'hello wecom' })
+  await fetch(`${base}/social/wecom/webhook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer smoke-wecom-token' },
+    body: JSON.stringify({ from_id: 'wecom:webhook:default', content: 'hello wecom' }),
+  })
   const wecomMsg = popMessage()
   if (wecomMsg?.fromId !== 'wecom:webhook:default' || wecomMsg?.content !== 'hello wecom') throw new Error('WeCom message enqueue failed')
 
@@ -57,4 +67,3 @@ try {
 } finally {
   await new Promise(resolve => server.close(resolve))
 }
-

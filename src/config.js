@@ -364,6 +364,7 @@ export function setVoiceConfig(updates) {
 // TTS 配置
 const TTS_CONFIG_KEYS = [
   'ttsProvider', 'ttsVoiceId',
+  'doubaoKey', 'doubaoAppId', 'doubaoAccessKey', 'doubaoResourceId',
   'openaiTtsKey', 'openaiTtsBaseURL',
   'elevenLabsKey',
   'volcanoAppId', 'volcanoToken',
@@ -375,6 +376,10 @@ export function getTTSConfig() {
   return {
     ttsProvider:     stored.ttsProvider  || 'minimax',
     ttsVoiceId:      stored.ttsVoiceId   || '',
+    doubaoKey:       { configured: !!(stored.doubaoKey) },
+    doubaoAppId:     { configured: !!(stored.doubaoAppId), value: stored.doubaoAppId || '' },
+    doubaoAccessKey: { configured: !!(stored.doubaoAccessKey) },
+    doubaoResourceId: stored.doubaoResourceId || '',
     openaiTtsBaseURL: stored.openaiTtsBaseURL || '',
     openaiTtsKey:    { configured: !!(stored.openaiTtsKey) },
     elevenLabsKey:   { configured: !!(stored.elevenLabsKey) },
@@ -390,6 +395,10 @@ export function getTTSCredentials() {
   return {
     provider:       stored.ttsProvider  || 'minimax',
     voiceId:        stored.ttsVoiceId   || '',
+    doubaoKey:      stored.doubaoKey    || process.env.DOUBAO_TTS_API_KEY || '',
+    doubaoAppId:    stored.doubaoAppId  || process.env.DOUBAO_TTS_APP_ID || '',
+    doubaoAccessKey: stored.doubaoAccessKey || process.env.DOUBAO_TTS_ACCESS_KEY || '',
+    doubaoResourceId: stored.doubaoResourceId || process.env.DOUBAO_TTS_RESOURCE_ID || '',
     minimaxKey:     process.env.MINIMAX_API_KEY || getMinimaxKey() || (config.provider === 'minimax' ? config.apiKey : '') || '',
     openaiKey:      stored.openaiTtsKey  || '',
     openaiBaseURL:  stored.openaiTtsBaseURL || '',

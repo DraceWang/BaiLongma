@@ -1,27 +1,27 @@
 # prebuild-clean.ps1
-# build 前清理 dist 目录：检测文件锁 → 优雅关闭锁定进程 → 删除旧产物
+# Clean dist before build: detect file locks, close locking processes, remove old artifacts.
 
 param([string]$DistPath = "dist")
 
 $ErrorActionPreference = "Stop"
 $distFull = Join-Path (Split-Path $PSScriptRoot) $DistPath
 
-# dist 不存在则直接跳过
+# Skip when dist does not exist.
 if (-not (Test-Path $distFull)) {
-    Write-Host "[prebuild] dist 目录不存在，跳过清理" -ForegroundColor Green
+    Write-Host "[prebuild] dist does not exist; skipping clean" -ForegroundColor Green
     exit 0
 }
 
 $asarPath = Join-Path $distFull "win-unpacked\resources\app.asar"
 
-# 如果 asar 不存在，直接删除 dist
+# If app.asar does not exist, remove dist directly.
 if (-not (Test-Path $asarPath)) {
     Remove-Item $distFull -Recurse -Force
-    Write-Host "[prebuild] dist 已清除" -ForegroundColor Green
+    Write-Host "[prebuild] dist removed" -ForegroundColor Green
     exit 0
 }
 
-# ── 用 Restart Manager API 找锁定进程 ──────────────────────────────────────
+# Use Restart Manager API to find locking processes.
 $rmCode = @'
 using System;
 using System.Collections.Generic;
@@ -83,19 +83,19 @@ Add-Type -TypeDefinition $rmCode
 $lockingPids = [RestartManager]::GetLockingPids($asarPath)
 
 if ($lockingPids.Count -gt 0) {
-    Write-Host "[prebuild] 发现以下进程锁定了 app.asar：" -ForegroundColor Yellow
+    Write-Host "[prebuild] app.asar is locked by these processes:" -ForegroundColor Yellow
     $closedNames = @()
     foreach ($pid in $lockingPids) {
         $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
         if ($proc) {
-            Write-Host "  → PID $pid  $($proc.Name)  $($proc.MainWindowTitle)" -ForegroundColor Yellow
+            Write-Host "  -> PID $pid  $($proc.Name)  $($proc.MainWindowTitle)" -ForegroundColor Yellow
             $closedNames += $proc.Name
-            # 优雅关闭（允许保存文件）
+            # Ask the process to close first so it can save state.
             $proc.CloseMainWindow() | Out-Null
         }
     }
 
-    # 等待进程退出，最多 6 秒
+    # Wait up to 6 seconds before forcing termination.
     $deadline = (Get-Date).AddSeconds(6)
     foreach ($pid in $lockingPids) {
         $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
@@ -103,24 +103,23 @@ if ($lockingPids.Count -gt 0) {
             Start-Sleep -Milliseconds 300
             $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
         }
-        # 超时则强制终止
         $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
         if ($proc -and -not $proc.HasExited) {
-            Write-Host "  → PID $pid 未响应，强制终止" -ForegroundColor Red
+            Write-Host "  -> PID $pid did not exit; terminating" -ForegroundColor Red
             Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
         }
     }
 
-    Write-Host "[prebuild] 锁定进程已关闭：$($closedNames -join ', ')" -ForegroundColor Green
-    Write-Host "[prebuild] 提示：build 完成后请重新打开这些应用" -ForegroundColor Cyan
+    Write-Host "[prebuild] closed locking processes: $($closedNames -join ', ')" -ForegroundColor Green
+    Write-Host "[prebuild] reopen these apps after the build completes" -ForegroundColor Cyan
     Start-Sleep -Milliseconds 500
 }
 
-# ── 删除 dist ──────────────────────────────────────────────────────────────
+# Remove dist.
 try {
     Remove-Item $distFull -Recurse -Force
-    Write-Host "[prebuild] dist 已清除，开始 build" -ForegroundColor Green
+    Write-Host "[prebuild] dist removed; starting build" -ForegroundColor Green
 } catch {
-    Write-Host "[prebuild] 清除失败: $_" -ForegroundColor Red
+    Write-Host "[prebuild] clean failed: $_" -ForegroundColor Red
     exit 1
 }

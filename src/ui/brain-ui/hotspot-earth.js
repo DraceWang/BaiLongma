@@ -54,6 +54,7 @@ export class HotspotEarth {
     this.earth    = null;
     this.clouds   = null;
     this.atmo     = null;
+    this.atmo2    = null;
     this.stars    = null;
     this.hotspots = null;
 
@@ -66,8 +67,8 @@ export class HotspotEarth {
     this.velY = 0.0008;   // 初始自转速度
 
     // 相机距离
-    this.camDist    = 2.6;
-    this.camDistMin = 1.6;
+    this.camDist    = 3.25;
+    this.camDistMin = 2.35;
     this.camDistMax = 4.5;
 
     // 入场动画
@@ -98,12 +99,18 @@ export class HotspotEarth {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h, false);
+    if (T.SRGBColorSpace) this.renderer.outputColorSpace = T.SRGBColorSpace;
+    if (T.ACESFilmicToneMapping) {
+      this.renderer.toneMapping = T.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = 1.15;
+    }
 
     // ── 光源 ──────────────────────────────────────────────
-    const sun = new T.DirectionalLight(0xffffff, 1.2);
-    sun.position.set(5, 3, 5);
+    const sun = new T.DirectionalLight(0xffffff, 2.35);
+    sun.position.set(5, 2.2, 4.5);
     this.scene.add(sun);
-    this.scene.add(new T.AmbientLight(0x112244, 0.8));
+    this.scene.add(new T.HemisphereLight(0xdcecff, 0x111827, 0.72));
+    this.scene.add(new T.AmbientLight(0xffffff, 0.16));
 
     // ── 贴图加载器 ────────────────────────────────────────
     const loader = new T.TextureLoader();
@@ -115,6 +122,9 @@ export class HotspotEarth {
       load(TEX.specular),
       load(TEX.clouds),
     ]);
+    [earthTex, cloudTex].forEach((tex) => {
+      if (tex && T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
+    });
 
     // ── 地球球体 ──────────────────────────────────────────
     const geo = new T.SphereGeometry(1, 64, 64);
@@ -122,20 +132,21 @@ export class HotspotEarth {
       map:         earthTex,
       normalMap:   normalTex,
       specularMap: specTex,
-      specular:    new T.Color(0x333333),
-      shininess:   18,
+      specular:    new T.Color(0x1d3557),
+      shininess:   28,
     });
     this.earth = new T.Mesh(geo, mat);
     this.scene.add(this.earth);
 
-    // ── 云层 ──────────────────────────────────────────────
+    // ── 云层 ──
     if (cloudTex) {
       const cloudGeo = new T.SphereGeometry(1.012, 48, 48);
       const cloudMat = new T.MeshPhongMaterial({
         map:         cloudTex,
         transparent: true,
-        opacity:     0.38,
+        opacity:     0.75,
         depthWrite:  false,
+        emissive:    new T.Color(0x666666),
       });
       this.clouds = new T.Mesh(cloudGeo, cloudMat);
       this.scene.add(this.clouds);
@@ -146,23 +157,24 @@ export class HotspotEarth {
     const atmoMat = new T.MeshBasicMaterial({
       color:       0x4488ff,
       transparent: true,
-      opacity:     0.08,
+      opacity:     0.06,
       side:        T.BackSide,
       depthWrite:  false,
     });
     this.atmo = new T.Mesh(atmoGeo, atmoMat);
     this.scene.add(this.atmo);
 
-    // ── 第二层稍厚大气（浅蓝边缘） ────────────────────────
+    // ── 第二层稍厚大气（浅蓝边缘）—— 必须保存引用才能参与出场动画 ──
     const atmo2Geo = new T.SphereGeometry(1.035, 32, 32);
     const atmo2Mat = new T.MeshBasicMaterial({
       color:       0x88ccff,
       transparent: true,
-      opacity:     0.05,
+      opacity:     0.035,
       side:        T.FrontSide,
       depthWrite:  false,
     });
-    this.scene.add(new T.Mesh(atmo2Geo, atmo2Mat));
+    this.atmo2 = new T.Mesh(atmo2Geo, atmo2Mat);
+    this.scene.add(this.atmo2);
 
     // ── 星空粒子 ──────────────────────────────────────────
     const starVerts = [];
@@ -184,6 +196,13 @@ export class HotspotEarth {
 
     // ── 热点标记 ──────────────────────────────────────────
     this._buildHotspots(T);
+
+    // ── 初始隐藏（等 triggerAppear 再显示，防止贴图加载完后闪现）──
+    this.earth.scale.setScalar(0);
+    if (this.clouds) this.clouds.scale.setScalar(0);
+    this.atmo.scale.setScalar(0);
+    this.atmo2.scale.setScalar(0);
+    this.stars.material.opacity = 0;
 
     // ── 事件监听 ──────────────────────────────────────────
     this._bindEvents();
@@ -263,6 +282,7 @@ export class HotspotEarth {
     if (this.earth)  this.earth.scale.setScalar(0);
     if (this.clouds) this.clouds.scale.setScalar(0);
     if (this.atmo)   this.atmo.scale.setScalar(0);
+    if (this.atmo2)  this.atmo2.scale.setScalar(0);
     if (this.stars)  this.stars.material.opacity = 0;
   }
 
@@ -276,12 +296,14 @@ export class HotspotEarth {
       if (this.earth)  this.earth.scale.setScalar(s);
       if (this.clouds) this.clouds.scale.setScalar(s);
       if (this.atmo)   this.atmo.scale.setScalar(s);
+      if (this.atmo2)  this.atmo2.scale.setScalar(s);
       if (this.stars)  this.stars.material.opacity = Math.min(1, s * 1.5);
       if (s > 0.999) {
         this.appearing = false;
         if (this.earth)  this.earth.scale.setScalar(1);
         if (this.clouds) this.clouds.scale.setScalar(1);
         if (this.atmo)   this.atmo.scale.setScalar(1);
+        if (this.atmo2)  this.atmo2.scale.setScalar(1);
         if (this.stars)  this.stars.material.opacity = 1;
       }
     }
@@ -291,7 +313,7 @@ export class HotspotEarth {
       this.velX *= 0.92;
       this.velY *= 0.92;
       this.rotX += this.velX;
-      this.rotY += this.velY + 0.0006; // 持续自转
+      this.rotY += this.velY + 0.0018; // 持续自转
       this.rotX = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.rotX));
     }
 
