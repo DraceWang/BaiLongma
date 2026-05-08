@@ -23,6 +23,7 @@ import { getClawbotQR, logoutClawbot } from './social/wechat-clawbot.js'
 import { startVoiceServer, stopVoiceServer, getVoiceStatus, restartVoiceServer } from './voice/manager.js'
 import { createCloudASRSession } from './voice/cloud-asr.js'
 import { getHotspots, setHotspotPanelState, getHotspotPanelState } from './hotspots.js'
+import { getPersonCard, setPersonCardPanelState, getPersonCardPanelState } from './person-cards.js'
 
 export { emitEvent }
 
@@ -148,7 +149,7 @@ function isPathInside(parentDir, candidatePath) {
 }
 
 function jsonResponse(res, status, body) {
-  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(body))
 }
 
@@ -492,6 +493,36 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
               ? body.active
               : /^(1|true|yes|open|show)$/i.test(String(body.active || ''))
             const state = setHotspotPanelState({ active, source: body.source || 'brain-ui' })
+            jsonResponse(res, 200, { ok: true, state })
+          })
+          .catch((err) => jsonResponse(res, 400, { ok: false, error: err.message }))
+        return
+      }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/person-card') {
+      const name = url.searchParams.get('name') || url.searchParams.get('q') || ''
+      jsonResponse(res, 200, { ok: true, card: getPersonCard(name) })
+      return
+    }
+
+    if (url.pathname === '/person-card-state') {
+      if (req.method === 'GET') {
+        jsonResponse(res, 200, { ok: true, state: getPersonCardPanelState() })
+        return
+      }
+      if (req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => {
+            const active = typeof body.active === 'boolean'
+              ? body.active
+              : /^(1|true|yes|open|show)$/i.test(String(body.active || ''))
+            const state = setPersonCardPanelState({
+              active,
+              source: body.source || 'brain-ui',
+              card: body.card || null,
+              name: body.name || '',
+            })
             jsonResponse(res, 200, { ok: true, state })
           })
           .catch((err) => jsonResponse(res, 400, { ok: false, error: err.message }))

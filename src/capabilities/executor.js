@@ -12,6 +12,7 @@ import { callCapability, listCapabilities } from '../providers/registry.js'
 import { isDailyLimitReached } from '../quota.js'
 import { setCustomInterval as setTickerInterval, getStatus as getTickerStatus } from '../ticker.js'
 import { setHotspotPanelState, getHotspotPanelState } from '../hotspots.js'
+import { setPersonCardPanelState, getPersonCardPanelState, getPersonCard } from '../person-cards.js'
 
 // 后台进程注册表：pid → { process, command, startedAt }
 const bgProcesses = new Map()
@@ -141,6 +142,7 @@ const TOOL_RISK = {
   set_tick_interval: 'medium',
   media_mode: 'low',
   hotspot_mode: 'low',
+  person_card_mode: 'low',
   music: 'low',
   delete_file: 'high',
   exec_command: 'high',
@@ -332,6 +334,8 @@ async function executeToolUnchecked(name, args, context = {}) {
         return execMediaMode(args)
       case 'hotspot_mode':
         return execHotspotMode(args)
+      case 'person_card_mode':
+        return execPersonCardMode(args)
       case 'music':
         return await execMusic(args)
       case 'schedule_reminder':
@@ -1697,6 +1701,56 @@ function execHotspotMode(args = {}) {
   }
 
   return JSON.stringify({ ok: true, tool: 'hotspot_mode', state })
+}
+
+function execPersonCardMode(args = {}) {
+  const action = String(args.action || 'status').trim().toLowerCase()
+  if (!['show', 'open', 'hide', 'close', 'update', 'toggle', 'status'].includes(action)) {
+    return JSON.stringify({ ok: false, tool: 'person_card_mode', error: 'unsupported action' })
+  }
+
+  let nextActive = null
+  if (action === 'show' || action === 'open' || action === 'update') nextActive = true
+  if (action === 'hide' || action === 'close') nextActive = false
+  if (action === 'toggle') nextActive = !getPersonCardPanelState().active
+
+  const name = String(args.name || args.person || '').trim()
+  const card = {
+    ...(name ? getPersonCard(name) : {}),
+    ...(args.card && typeof args.card === 'object' ? args.card : {}),
+  }
+  if (name) card.name = name
+  for (const key of ['title', 'summary', 'image', 'avatar', 'source']) {
+    if (typeof args[key] === 'string' && args[key].trim()) card[key] = args[key].trim()
+  }
+  if (Array.isArray(args.knownFor) || typeof args.knownFor === 'string') card.knownFor = args.knownFor
+  if (Array.isArray(args.tags) || typeof args.tags === 'string') card.tags = args.tags
+  if (Array.isArray(args.aliases) || typeof args.aliases === 'string') card.aliases = args.aliases
+
+  const state = typeof nextActive === 'boolean'
+    ? setPersonCardPanelState({
+        active: nextActive,
+        source: 'agent_tool',
+        card: (card.name || card.summary || card.title) ? card : null,
+        name,
+      })
+    : getPersonCardPanelState()
+
+  if (typeof nextActive === 'boolean') {
+    emitEvent('person_card_mode', {
+      action: state.active ? 'show' : 'hide',
+      active: state.active,
+      card: state.card,
+      reason: typeof args.reason === 'string' ? args.reason : '',
+    })
+    emitEvent('action', {
+      tool: 'person_card_mode',
+      summary: state.active ? `打开人物卡片${state.card?.name ? `：${state.card.name}` : ''}` : '关闭人物卡片',
+      detail: args.reason || '',
+    })
+  }
+
+  return JSON.stringify({ ok: true, tool: 'person_card_mode', state })
 }
 
 // ── Music Library ─────────────────────────────────────────────────────────────

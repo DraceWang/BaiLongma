@@ -350,6 +350,30 @@ export const TOOL_SCHEMAS = {
     }
   },
 
+  person_card_mode: {
+    type: 'function',
+    function: {
+      name: 'person_card_mode',
+      description: '控制人物卡片面板。只在用户明确表示不认识某人、询问“某人是谁/哪位/为什么火”，或当前对话确实需要解释公众人物时使用；普通问答不要主动打开。可以传入基础资料更新卡片。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['show', 'open', 'hide', 'close', 'update', 'toggle', 'status'], description: 'show/open/update 打开或更新人物卡片；hide/close 关闭；toggle 切换；status 只查询状态' },
+          name: { type: 'string', description: '人物姓名，例如“周杰伦”' },
+          title: { type: 'string', description: '人物身份/头衔，例如“歌手 / 音乐人”' },
+          summary: { type: 'string', description: '一句到两句简介，避免编造不确定信息' },
+          knownFor: { type: 'array', items: { type: 'string' }, description: '代表作、代表事件或用户最需要知道的识别点' },
+          tags: { type: 'array', items: { type: 'string' }, description: '简短标签，例如“演员”“华语音乐”' },
+          aliases: { type: 'array', items: { type: 'string' }, description: '别名、英文名或常见昵称' },
+          image: { type: 'string', description: '人物大图 URL，可选，优先用于卡片主图' },
+          avatar: { type: 'string', description: '头像或人物图片 URL，可选' },
+          reason: { type: 'string', description: '简短说明为什么打开或关闭，可选' },
+        },
+        required: ['action']
+      }
+    }
+  },
+
   music: {
     type: 'function',
     function: {

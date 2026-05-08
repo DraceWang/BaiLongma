@@ -1,0 +1,397 @@
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+import { paths } from './paths.js'
+import { upsertMemoryByMemId } from './db.js'
+import { nowTimestamp } from './time.js'
+
+const PERSON_CARD_CONTEXT_TTL_MINUTES = 60
+const PERSON_CARD_STORE_FILE = path.join(paths.dataDir, 'person-cards.json')
+
+const PERSON_CARD_LIBRARY = [
+  {
+    name: '周杰伦',
+    aliases: ['Jay Chou', '杰伦'],
+    title: '歌手 / 音乐人 / 导演',
+    summary: '华语流行音乐代表人物之一，以融合 R&B、嘻哈、中国风和古典元素的作品闻名。',
+    knownFor: ['七里香', '青花瓷', '稻香', '不能说的秘密'],
+    tags: ['华语音乐', '创作歌手', '中国风'],
+  },
+  {
+    name: '刘德华',
+    aliases: ['Andy Lau', '华仔'],
+    title: '演员 / 歌手 / 制片人',
+    summary: '香港“四大天王”之一，长期活跃于电影、音乐和公益领域。',
+    knownFor: ['无间道', '天若有情', '忘情水', '恭喜发财'],
+    tags: ['香港电影', '粤语流行', '四大天王'],
+  },
+  {
+    name: '成龙',
+    aliases: ['Jackie Chan'],
+    title: '演员 / 导演 / 动作指导',
+    summary: '国际知名动作电影演员，以高难度动作喜剧和亲自完成特技著称。',
+    knownFor: ['警察故事', '尖峰时刻', '醉拳', '十二生肖'],
+    tags: ['动作电影', '功夫', '国际影星'],
+  },
+  {
+    name: '周星驰',
+    aliases: ['Stephen Chow', '星爷'],
+    title: '演员 / 导演 / 编剧',
+    summary: '香港喜剧电影代表人物，形成了辨识度很高的无厘头喜剧风格。',
+    knownFor: ['大话西游', '功夫', '喜剧之王', '少林足球'],
+    tags: ['香港电影', '喜剧', '导演'],
+  },
+  {
+    name: '王一博',
+    aliases: ['YiBo'],
+    title: '演员 / 歌手 / 舞者',
+    summary: '中国内地艺人，因影视、舞台、街舞和赛车相关活动受到关注。',
+    knownFor: ['陈情令', '无名', '这就是街舞', '长空之王'],
+    tags: ['演员', '舞者', '流量明星'],
+  },
+  {
+    name: '肖战',
+    aliases: ['Sean Xiao'],
+    title: '演员 / 歌手',
+    summary: '中国内地演员和歌手，因影视剧、音乐作品和舞台活动拥有较高讨论度。',
+    knownFor: ['陈情令', '斗罗大陆', '玉骨遥', '光点'],
+    tags: ['演员', '歌手', '流量明星'],
+  },
+  {
+    name: '迪丽热巴',
+    aliases: ['Dilraba', 'Dilireba'],
+    title: '演员',
+    summary: '中国内地女演员，出演多部古装、都市和偶像题材影视作品。',
+    knownFor: ['三生三世十里桃花', '你是我的荣耀', '长歌行', '克拉恋人'],
+    tags: ['演员', '影视明星'],
+  },
+  {
+    name: '杨幂',
+    aliases: ['Mini Yang'],
+    title: '演员 / 制片人',
+    summary: '中国内地女演员，长期活跃于电视剧、电影和艺人经纪领域。',
+    knownFor: ['宫锁心玉', '三生三世十里桃花', '小时代', '仙剑奇侠传三'],
+    tags: ['演员', '制片人'],
+  },
+  {
+    name: '赵丽颖',
+    aliases: ['Zanilia Zhao'],
+    title: '演员',
+    summary: '中国内地女演员，以多部古装、现实题材电视剧获得广泛关注。',
+    knownFor: ['花千骨', '知否知否应是绿肥红瘦', '楚乔传', '风吹半夏'],
+    tags: ['演员', '电视剧'],
+  },
+  {
+    name: '易烊千玺',
+    aliases: ['Jackson Yee'],
+    title: '演员 / 歌手 / 舞者',
+    summary: 'TFBOYS 成员之一，后来在电影表演和个人音乐舞台上持续发展。',
+    knownFor: ['少年的你', '长津湖', '奇迹·笨小孩', 'TFBOYS'],
+    tags: ['演员', '歌手', '青年演员'],
+  },
+  {
+    name: '蔡徐坤',
+    aliases: ['KUN'],
+    title: '歌手 / 舞者 / 音乐制作人',
+    summary: '中国内地流行歌手和舞者，因偶像选秀、音乐舞台和综艺节目获得高关注。',
+    knownFor: ['偶像练习生', 'Wait Wait Wait', '情人', '青春有你'],
+    tags: ['歌手', '偶像', '舞台'],
+  },
+  {
+    name: '邓紫棋',
+    aliases: ['G.E.M.', 'GEM'],
+    title: '歌手 / 词曲作者',
+    summary: '华语流行女歌手，以高辨识度唱腔、创作能力和现场演唱实力闻名。',
+    knownFor: ['泡沫', '光年之外', '句号', '我是歌手'],
+    tags: ['华语音乐', '创作歌手'],
+  },
+  {
+    name: 'Taylor Swift',
+    aliases: ['泰勒斯威夫特', '泰勒·斯威夫特', '霉霉'],
+    title: 'Singer-songwriter',
+    summary: '美国创作歌手，长期以流行、乡村和叙事型歌词作品影响全球流行文化。',
+    knownFor: ['Love Story', 'Blank Space', 'Shake It Off', 'Eras Tour'],
+    tags: ['欧美音乐', '创作歌手', '流行文化'],
+  },
+]
+
+let panelActiveUntilMs = 0
+let panelState = {
+  active: false,
+  updatedAtMs: 0,
+  source: 'startup',
+  card: null,
+}
+let cardStore = null
+
+function normalizeText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{Script=Han}a-z0-9]+/gu, '')
+}
+
+function normalizeList(value) {
+  if (Array.isArray(value)) return value.map(v => String(v || '').trim()).filter(Boolean)
+  if (typeof value === 'string') return value.split(/[,，、;；\n]/).map(v => v.trim()).filter(Boolean)
+  return []
+}
+
+function personCardId(name = '') {
+  const normalized = normalizeText(name).slice(0, 80) || String(name || 'unknown')
+  const hash = crypto.createHash('sha1').update(normalized).digest('hex').slice(0, 12)
+  return `person_card_${hash}`
+}
+
+function loadCardStore() {
+  if (cardStore) return cardStore
+  try {
+    const parsed = JSON.parse(fs.readFileSync(PERSON_CARD_STORE_FILE, 'utf-8'))
+    cardStore = parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    cardStore = {}
+  }
+  return cardStore
+}
+
+function writeCardStore() {
+  try {
+    fs.mkdirSync(path.dirname(PERSON_CARD_STORE_FILE), { recursive: true })
+    fs.writeFileSync(PERSON_CARD_STORE_FILE, JSON.stringify(loadCardStore(), null, 2), 'utf-8')
+  } catch (err) {
+    console.warn('[PersonCard] 人物卡片落盘失败:', err.message)
+  }
+}
+
+function hasUsefulCardData(card = {}) {
+  const knownFor = normalizeList(card.knownFor ?? card.works)
+  const tags = normalizeList(card.tags)
+  const summary = String(card.summary || '').trim()
+  const title = String(card.title || card.identity || card.role || '').trim()
+  const image = String(card.image || card.photo || card.avatar || '').trim()
+  return Boolean(
+    image ||
+    knownFor.length ||
+    tags.some(tag => tag && tag !== '待补充' && tag !== 'standby') ||
+    (summary && !summary.includes('暂时没有') && !summary.includes('暂无简介')) ||
+    (title && title !== '人物卡片' && title !== '待命')
+  )
+}
+
+function storedKeysForCard(card = {}) {
+  const names = [card.name, ...(normalizeList(card.aliases))]
+  return [...new Set(names.map(normalizeText).filter(Boolean))]
+}
+
+function mergeCardData(existing = {}, incoming = {}) {
+  const merged = normalizeCard({
+    ...existing,
+    ...incoming,
+    aliases: [...new Set([...normalizeList(existing.aliases), ...normalizeList(incoming.aliases)])],
+    knownFor: [...new Set([...normalizeList(existing.knownFor), ...normalizeList(incoming.knownFor ?? incoming.works)])],
+    tags: [...new Set([...normalizeList(existing.tags), ...normalizeList(incoming.tags)])],
+    image: incoming.image || incoming.photo || incoming.avatar || existing.image || existing.photo || existing.avatar || '',
+    avatar: incoming.avatar || incoming.image || incoming.photo || existing.avatar || existing.image || existing.photo || '',
+    source: incoming.source && incoming.source !== 'fallback' ? incoming.source : (existing.source || incoming.source || 'saved'),
+    updatedAt: new Date().toISOString(),
+  })
+  return merged
+}
+
+function savePersonCard(card = {}) {
+  if (!card?.name || !hasUsefulCardData(card)) return null
+  const store = loadCardStore()
+  const primaryKey = normalizeText(card.name)
+  const existing = store[primaryKey] || null
+  const saved = mergeCardData(existing || {}, { ...card, source: card.source || 'saved' })
+  for (const key of storedKeysForCard(saved)) {
+    store[key] = saved
+  }
+  writeCardStore()
+  return saved
+}
+
+function baseCardFromName(name = '') {
+  const normalizedName = String(name || '').trim() || '未知人物'
+  return {
+    id: personCardId(normalizedName),
+    name: normalizedName,
+    aliases: [],
+    title: '人物卡片',
+    summary: '暂时没有内置资料。可以让 Longma 补充身份、代表作品和为什么被提到。',
+    knownFor: [],
+    tags: ['待补充'],
+    source: 'fallback',
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function normalizeCard(card = {}) {
+  const name = String(card.name || card.person || card.title || '').trim()
+  const base = baseCardFromName(name)
+  return {
+    ...base,
+    ...card,
+    id: card.id || base.id || personCardId(name),
+    name: name || base.name,
+    aliases: normalizeList(card.aliases ?? base.aliases),
+    knownFor: normalizeList(card.knownFor ?? card.works ?? base.knownFor),
+    tags: normalizeList(card.tags ?? base.tags),
+    summary: String(card.summary || base.summary || '').trim(),
+    title: String(card.title || card.identity || card.role || base.title || '人物卡片').trim(),
+    image: String(card.image || card.photo || card.avatar || base.image || base.avatar || '').trim(),
+    avatar: String(card.avatar || card.image || card.photo || base.avatar || base.image || '').trim(),
+    source: String(card.source || base.source || 'agent').trim(),
+    updatedAt: card.updatedAt || new Date().toISOString(),
+  }
+}
+
+export function findPersonCard(query = '') {
+  const normalized = normalizeText(query)
+  if (!normalized) return null
+  const store = loadCardStore()
+  const saved = store[normalized]
+  if (saved) return normalizeCard({ ...saved, source: saved.source || 'saved' })
+
+  for (const card of PERSON_CARD_LIBRARY) {
+    const names = [card.name, ...(card.aliases || [])]
+    if (names.some(name => normalizeText(name) === normalized)) {
+      return normalizeCard({ ...card, source: 'builtin' })
+    }
+  }
+  for (const card of PERSON_CARD_LIBRARY) {
+    const names = [card.name, ...(card.aliases || [])]
+    if (names.some(name => normalizeText(name).includes(normalized) || normalized.includes(normalizeText(name)))) {
+      return normalizeCard({ ...card, source: 'builtin' })
+    }
+  }
+
+  for (const card of Object.values(store)) {
+    const names = [card.name, ...(card.aliases || [])]
+    if (names.some(name => normalizeText(name).includes(normalized) || normalized.includes(normalizeText(name)))) {
+      return normalizeCard({ ...card, source: card.source || 'saved' })
+    }
+  }
+  return null
+}
+
+export function extractPersonCardQuery(message = '') {
+  const text = String(message || '').trim()
+  if (!text) return ''
+
+  const patterns = [
+    /(?:我)?(?:不认识|不了解|不知道|没听过)\s*([\p{Script=Han}A-Za-z][\p{Script=Han}A-Za-z0-9·.\-\s]{1,24})/u,
+    /([\p{Script=Han}A-Za-z][\p{Script=Han}A-Za-z0-9·.\-\s]{1,24})\s*(?:是谁|是什么人|哪位|干嘛的|为什么火|为什么红)/u,
+    /(?:这个人|这位|这个明星|那个明星|这明星)\s*(?:是谁|是什么人|哪位|干嘛的)/u,
+  ]
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    const raw = match?.[1] || ''
+    const cleaned = raw
+      .replace(/^(你知道|知道|请问|帮我看看|帮我查查|那个|这个|这位|那位|明星|叫|是|叫做|名叫)\s*/, '')
+      .replace(/^(你知道|知道|请问|那个|这个|这位|那位)\s*/, '')
+      .replace(/[，。！？?!.、：:；;].*$/, '')
+      .trim()
+    if (cleaned) return cleaned
+  }
+  return ''
+}
+
+export function setPersonCardPanelState({ active, source = 'unknown', card = null, name = '' } = {}) {
+  const nextActive = typeof active === 'boolean' ? active : panelState.active
+  const nextCard = card
+    ? normalizeCard(card)
+    : (name ? (findPersonCard(name) || baseCardFromName(name)) : panelState.card)
+  const persistedCard = nextCard ? savePersonCard(nextCard) : null
+
+  panelState = {
+    active: nextActive,
+    updatedAtMs: Date.now(),
+    source,
+    card: persistedCard || nextCard,
+  }
+  if (nextActive) panelActiveUntilMs = Date.now() + PERSON_CARD_CONTEXT_TTL_MINUTES * 60 * 1000
+  return getPersonCardPanelState()
+}
+
+export function getPersonCardPanelState() {
+  const now = Date.now()
+  return {
+    ...panelState,
+    updatedAt: panelState.updatedAtMs ? new Date(panelState.updatedAtMs).toISOString() : null,
+    contextActive: now < panelActiveUntilMs,
+    contextTtlSeconds: Math.max(0, Math.round((panelActiveUntilMs - now) / 1000)),
+  }
+}
+
+export function getPersonCard(query = '') {
+  return findPersonCard(query) || baseCardFromName(query)
+}
+
+export function buildPersonCardPanelStateContext() {
+  const state = getPersonCardPanelState()
+  const status = state.active ? '开启' : '关闭'
+  const ttl = state.contextActive ? `人物卡片上下文 TTL 剩余约 ${Math.ceil(state.contextTtlSeconds / 60)} 分钟` : '当前没有有效人物卡片上下文 TTL'
+  const current = state.card?.name ? `当前人物：${state.card.name}。` : '当前没有选中人物。'
+  return `## 人物卡片状态
+当前人物卡片面板：${status}。${current}${ttl}。
+如用户明确表示“不认识某人”“某人是谁”，或演示需要，可使用 person_card_mode 工具打开、更新或关闭人物卡片；普通回答不要为了炫技主动打开。`
+}
+
+function persistMentionedPerson(card, message = '') {
+  if (!card?.name) return null
+  const timestamp = nowTimestamp()
+  const memId = `known_person_${personCardId(card.name).replace(/^person_card_/, '')}`
+  const detail = [
+    `身份：${card.title || '未知'}`,
+    `简介：${card.summary || ''}`,
+    card.knownFor?.length ? `代表作/代表事件：${card.knownFor.join('、')}` : '',
+    card.tags?.length ? `标签：${card.tags.join('、')}` : '',
+    `来源：${card.source || 'person_card'}`,
+    `触发消息摘录：${String(message || '').slice(0, 120)}`,
+    '这是程序自动归档的人物识别事实。后续如有更准确资料，可用 upsert_memory 更新同一个 mem_id。',
+  ].filter(Boolean).join('\n')
+
+  return upsertMemoryByMemId({
+    mem_id: memId,
+    type: 'person_card',
+    title: `人物卡片：${card.name}`,
+    content: `用户询问或提到了人物：${card.name}`,
+    detail,
+    entities: ['SYSTEM'],
+    concepts: [card.name, ...(card.aliases || []), ...(card.tags || [])].filter(Boolean).slice(0, 16),
+    tags: ['person_card', 'public_figure', `source:${card.source || 'unknown'}`],
+    source_ref: 'person_card_context',
+    timestamp,
+  })
+}
+
+export function buildPersonCardRuntimeContext(message = '') {
+  const query = extractPersonCardQuery(message)
+  const matchedCard = query ? getPersonCard(query) : null
+  const state = getPersonCardPanelState()
+  const card = matchedCard || (state.contextActive ? state.card : null)
+  if (!card?.name) return ''
+
+  let persistedId = ''
+  if (matchedCard) {
+    try {
+      const result = persistMentionedPerson(matchedCard, message)
+      persistedId = result?.mem_id || ''
+    } catch (err) {
+      console.warn('[PersonCard] 自动归档人物记忆失败:', err.message)
+    }
+  }
+
+  return `## 人物卡片上下文
+来源：人物卡片模式，系统自动采集/用户触发。发送者：SYSTEM。用途：帮助解释用户可能不认识的公众人物，不代表用户单独提出了新任务。
+
+当前人物：${card.name}
+身份：${card.title || '未知'}
+简介：${card.summary || '暂无'}
+代表作/代表事件：${card.knownFor?.length ? card.knownFor.join('、') : '暂无'}
+标签：${card.tags?.length ? card.tags.join('、') : '暂无'}
+来源：${card.source || 'person_card'}${persistedId ? `\n已自动归档为长期人物记忆：${persistedId}` : ''}
+
+使用规则：只有在用户明确询问“谁是某人”“不认识某人”，或该人物与当前话题直接相关时才主动解释；解释要简洁，避免编造不确定的生平细节。`
+}

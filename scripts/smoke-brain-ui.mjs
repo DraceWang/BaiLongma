@@ -126,6 +126,45 @@ function createServer() {
       return
     }
 
+    if (url.pathname === '/person-card') {
+      const name = url.searchParams.get('name') || ''
+      if (name.includes('马云')) {
+        sendJson(res, {
+          ok: true,
+          card: {
+            name: '马云',
+            title: '人物卡片',
+            summary: '暂时没有内置资料。可以让 Longma 补充身份、代表作品和为什么被提到。',
+            knownFor: [],
+            tags: ['待补充'],
+            image: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 640 360%22%3E%3Crect width=%22640%22 height=%22360%22 fill=%22%23112332%22/%3E%3Ccircle cx=%22320%22 cy=%22130%22 r=%2260%22 fill=%22%2382d2ff%22/%3E%3Crect x=%22205%22 y=%22210%22 width=%22230%22 height=%2280%22 rx=%2240%22 fill=%22%2382d2ff%22/%3E%3C/svg%3E',
+            source: 'fallback',
+            updatedAt: new Date().toISOString(),
+          },
+        })
+        return
+      }
+      sendJson(res, {
+        ok: true,
+        card: {
+          name: '周杰伦',
+          title: '歌手 / 音乐人',
+          summary: '华语流行音乐代表人物之一。',
+          knownFor: ['七里香', '青花瓷'],
+          tags: ['华语音乐', '创作歌手'],
+          image: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 640 360%22%3E%3Crect width=%22640%22 height=%22360%22 fill=%22%23112332%22/%3E%3Ccircle cx=%22320%22 cy=%22130%22 r=%2260%22 fill=%22%2382d2ff%22/%3E%3Crect x=%22205%22 y=%22210%22 width=%22230%22 height=%2280%22 rx=%2240%22 fill=%22%2382d2ff%22/%3E%3C/svg%3E',
+          source: 'smoke',
+          updatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+
+    if (url.pathname === '/person-card-state') {
+      sendJson(res, { ok: true, state: { active: true } })
+      return
+    }
+
     if (url.pathname === '/social/wechat-clawbot/qr') {
       sendJson(res, { ok: true, qr: null, status: 'unavailable' })
       return
@@ -157,6 +196,11 @@ function createServer() {
       try { client.end() } catch {}
     }
     sseClients.clear()
+  }
+  server.emitSse = (event) => {
+    for (const client of sseClients) {
+      try { client.write(`data: ${JSON.stringify(event)}\n\n`) } catch {}
+    }
   }
   return server
 }
@@ -194,18 +238,51 @@ try {
   await page.goto(`${baseUrl}/brain-ui`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#graph circle', { timeout: 5000 })
   await page.waitForFunction(() => window.d3 && document.querySelector('#agent-brand-name')?.textContent.includes('SmokeLongma'))
+  await page.fill('#msg-input', '马云是谁')
+  await page.click('#send-btn')
+  await page.waitForTimeout(300)
+  const appearedTooFast = await page.evaluate(() => document.body.classList.contains('person-card-mode'))
+  if (appearedTooFast) throw new Error('person card appeared before the intended reveal delay')
+  await page.waitForFunction(() => document.body.classList.contains('person-card-mode') && document.querySelector('#pc-name')?.textContent.includes('马云'))
+  const enteringSeen = await page.evaluate(() => document.querySelector('#person-card-panel')?.classList.contains('pc-entering'))
+  if (!enteringSeen) throw new Error('person card did not use the entering glitch state')
+  server.emitSse({
+    type: 'message',
+    data: {
+      from: 'consciousness',
+      content: '马云，1964年生，浙江杭州人，阿里巴巴集团创始人，曾任董事局主席，创办了淘宝、支付宝，多次成为中国首富。',
+    },
+    ts: new Date().toISOString(),
+  })
+  await page.waitForFunction(() => document.querySelector('#pc-summary')?.textContent.includes('阿里巴巴集团创始人'))
 
   const snapshot = await page.evaluate(() => ({
     d3: Boolean(window.d3),
     nodes: document.querySelectorAll('#graph circle').length,
     links: document.querySelectorAll('#graph line').length,
     acuiHost: Boolean(document.getElementById('acui-host')),
+    personCard: document.querySelector('#pc-name')?.textContent || '',
+    personSummary: document.querySelector('#pc-summary')?.textContent || '',
+    personKnownFor: [...document.querySelectorAll('#pc-known-list li')].map(li => li.textContent).join(' / '),
+    personImage: !document.querySelector('#pc-hero-img')?.hidden,
+    closeHidden: getComputedStyle(document.querySelector('#pc-exit-btn')).opacity === '0',
     brand: document.querySelector('#agent-brand-name')?.textContent || '',
   }))
 
   if (!snapshot.d3) throw new Error('d3 global missing')
   if (snapshot.nodes < 2) throw new Error(`expected at least 2 graph nodes, saw ${snapshot.nodes}`)
   if (!snapshot.acuiHost) throw new Error('ACUI host was not bootstrapped')
+  if (!snapshot.personCard.includes('马云')) throw new Error('person card did not render the requested person')
+  if (!snapshot.personSummary.includes('阿里巴巴集团创始人')) throw new Error('person card did not absorb assistant summary')
+  if (!snapshot.personKnownFor.includes('淘宝')) throw new Error('person card did not absorb assistant known-for items')
+  if (!snapshot.personImage) throw new Error('person card hero image was not visible')
+  if (!snapshot.closeHidden) throw new Error('person card close button should be hidden until hover')
+  await page.hover('.pc-card')
+  await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('#pc-exit-btn')).opacity) > 0.5)
+  await page.click('#pc-exit-btn')
+  const leavingSeen = await page.waitForFunction(() => document.querySelector('#person-card-panel')?.classList.contains('pc-leaving'), null, { timeout: 1000 })
+  if (!leavingSeen) throw new Error('person card did not use the leaving glitch state')
+  await page.waitForFunction(() => !document.body.classList.contains('person-card-mode') && !document.querySelector('#person-card-panel')?.classList.contains('pc-visible'))
   if (errors.length) throw new Error(`browser errors:\n${errors.join('\n')}`)
 
   console.log('[PASS] brain-ui smoke')

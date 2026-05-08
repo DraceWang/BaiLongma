@@ -1,4 +1,5 @@
 import { createHotspotPanel } from './hotspot-panel.js';
+import { createPersonCardPanel } from './person-card-panel.js';
 
 const createGraphStage = () => `
 <div class="grid-overlay"></div>
@@ -631,6 +632,7 @@ export function createBrainUiMarkup() {
     createMusicPanel(),
     createImagePanel(),
     createHotspotPanel(),
+    createPersonCardPanel(),
   ].join("\n\n");
 }
 

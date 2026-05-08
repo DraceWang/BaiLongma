@@ -6,6 +6,7 @@ import { initPanelCollapse } from "./panel-collapse.js";
 import { ThoughtStream } from "./thought-stream.js";
 import { initVoicePanel } from "./voice-panel.js";
 import { initHotspot, toggleHotspot, setHotspotMode, moveVoicePanelToBody, restoreVoicePanel } from "./hotspot.js";
+import { initPersonCard, setPersonCardMode, showPersonCardByName, extractPersonCardQuery, updatePersonCardFromAssistantText } from "./person-card.js";
 renderBrainUiApp(document.body);
 const THEME_KEY = "jarvis-brain-ui-theme";
 const PHYSICS_STORAGE_KEY = "jarvis-brain-ui-physics";
@@ -1208,6 +1209,7 @@ function handle({ type, data = {} }) {
     case "message":
       if (data.from === "consciousness") {
         addMsg("jarvis", data.content);
+        updatePersonCardFromAssistantText(data.content);
         openChat(true);
       }
       break;
@@ -1225,6 +1227,9 @@ function handle({ type, data = {} }) {
       break;
     case "hotspot_mode":
       setHotspotMode(!!data.active || data.action === "show" || data.action === "open", { source: "agent_event" });
+      break;
+    case "person_card_mode":
+      setPersonCardMode(!!data.active || data.action === "show" || data.action === "open" || data.action === "update", { source: "agent_event", card: data.card || null });
       break;
     case "social_status":
       window.dispatchEvent(new CustomEvent("bailongma:social_status", { detail: data }));
@@ -1328,6 +1333,14 @@ chat = initChat({
       toggleHotspot();
       return;
     }
+    if (document.body.classList.contains('person-card-mode') && /关闭|退出|关掉|隐藏/.test(text)) {
+      setPersonCardMode(false, { source: 'chat_input' });
+      return;
+    }
+    const personQuery = extractPersonCardQuery(text);
+    if (personQuery) {
+      showPersonCardByName(personQuery, { source: 'chat_input' });
+    }
     if (/热点|热搜/.test(text) && !document.body.classList.contains('hotspot-mode')) {
       toggleHotspot();
     }
@@ -1343,6 +1356,7 @@ if (MEMORY_GRAPH_ENABLED) {
 }
 connectSSE();
 loadAgentProfile();
+initPersonCard();
 chat.restoreChatHistory();
 initUpdaterUi();
 chat.unlockAudioOnFirstGesture();
