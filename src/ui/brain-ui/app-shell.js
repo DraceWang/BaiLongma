@@ -15,8 +15,8 @@ const createPrimaryPanel = () => `
       <div class="brand-title" id="agent-brand-name">Longma AI Agent</div>
     </div>
     <button class="voice-btn" id="voice-btn" title="麦克风 开/关" type="button">🎤</button>
-    <button class="video-btn" id="video-btn" title="视频模式 (V)" type="button">⊞</button>
-    <button class="music-btn" id="music-btn" title="音乐模式 (M)" type="button">♪</button>
+    <button class="video-btn" id="video-btn" title="视频模式 (V)" type="button" hidden>⊞</button>
+    <button class="music-btn" id="music-btn" title="音乐模式 (M)" type="button" hidden>♪</button>
     <button class="settings-btn" id="settings-btn" title="设置" type="button">⚙</button>
   </header>
 
@@ -202,15 +202,27 @@ const createSettingsModal = () => `
                 <option value="auto">自动识别</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="minimax">MiniMax</option>
+                <option value="custom">自定义端点（本地/其他）</option>
               </select>
             </div>
-            <div class="settings-row">
+            <div class="settings-row" id="settings-model-row">
               <label class="settings-label" for="settings-model-select">模型</label>
               <select class="settings-select" id="settings-model-select"></select>
             </div>
+            <!-- 自定义端点字段（选择"自定义端点"时显示） -->
+            <div id="settings-custom-llm-section" style="display:none;">
+              <div class="settings-row">
+                <label class="settings-label" for="settings-custom-baseurl">Base URL</label>
+                <input class="settings-input" id="settings-custom-baseurl" type="text" placeholder="如 http://localhost:11434/v1">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="settings-custom-model">模型名称</label>
+                <input class="settings-input" id="settings-custom-model" type="text" placeholder="如 llama3.2, qwen2.5, mistral">
+              </div>
+            </div>
             <div class="settings-row">
               <label class="settings-label" for="settings-llm-key">API Key</label>
-              <input class="settings-input" id="settings-llm-key" type="password" placeholder="留空则仅切换模型…" autocomplete="new-password">
+              <input class="settings-input" id="settings-llm-key" type="password" placeholder="自定义端点可留空；其他留空则仅切换模型" autocomplete="new-password">
             </div>
             <div class="settings-row-action">
               <button class="settings-save-btn" id="settings-save-llm" type="button">保存</button>
@@ -333,42 +345,6 @@ const createSettingsModal = () => `
         <!-- ── 语音 tab ── -->
         <div class="settings-tab" data-tab="voice">
           <div class="settings-section">
-            <div class="settings-section-label">识别模式</div>
-            <div class="settings-row">
-              <label class="settings-label" for="voice-mode-select">模式选择</label>
-              <select class="settings-select" id="voice-mode-select">
-                <option value="browser">浏览器内置（默认）</option>
-                <option value="local">本地 Whisper（离线高精度）</option>
-                <option value="cloud">云端 API</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="settings-section" id="voice-local-section">
-            <div class="settings-section-label">本地模式配置</div>
-            <p class="settings-hint">本地 Whisper 服务需手动启动，会占用较多 CPU 资源（低配笔记本会发热），建议按需开启。切换模型后需重新加载（10–60 秒）。</p>
-            <div class="settings-row">
-              <label class="settings-label" for="voice-whisper-model">Whisper 模型</label>
-              <select class="settings-select" id="voice-whisper-model">
-                <option value="tiny">tiny（最快，精度低）</option>
-                <option value="base">base</option>
-                <option value="small">small（推荐）</option>
-                <option value="medium">medium</option>
-                <option value="large">large（最慢，精度高）</option>
-              </select>
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">服务状态</label>
-              <span id="voice-whisper-svc-status" style="color:var(--ink2);font-size:13px;" data-state="stopped">未运行</span>
-              <button class="settings-save-btn" id="voice-start-whisper-btn" type="button" style="margin-left:8px;padding:2px 10px;font-size:12px;">启动服务</button>
-            </div>
-            <div class="settings-row" id="voice-whisper-status-row" style="display:none;">
-              <label class="settings-label">加载进度</label>
-              <span id="voice-whisper-status" style="color:var(--ink2);font-size:13px;">就绪</span>
-            </div>
-          </div>
-
-          <div class="settings-section" id="voice-cloud-section" style="display:none;">
             <div class="settings-section-label">云端模式配置</div>
             <div class="settings-row">
               <label class="settings-label" for="voice-provider-select">服务商</label>
@@ -455,22 +431,10 @@ const createSettingsModal = () => `
 
             <div id="tts-creds-doubao" style="display:none;">
               <div class="settings-row">
-                <label class="settings-label" for="tts-doubao-appid">豆包 App ID</label>
-                <input class="settings-input" type="text" id="tts-doubao-appid" placeholder="留空则不修改">
-              </div>
-              <div class="settings-row">
-                <label class="settings-label" for="tts-doubao-access-key">Access Key / Token</label>
-                <input class="settings-input" type="password" id="tts-doubao-access-key" placeholder="留空则不修改">
-              </div>
-              <div class="settings-row">
-                <label class="settings-label" for="tts-doubao-resource-id">Resource ID</label>
-                <input class="settings-input" type="text" id="tts-doubao-resource-id" placeholder="留空自动匹配 seed-tts-2.0">
-              </div>
-              <div class="settings-row">
-                <label class="settings-label" for="tts-doubao-key">API Key（兼容旧配置）</label>
+                <label class="settings-label" for="tts-doubao-key">API Key</label>
                 <input class="settings-input" type="password" id="tts-doubao-key" placeholder="留空则不修改">
               </div>
-              <p class="settings-hint">在<a href="https://console.volcengine.com/speech/app" target="_blank" style="color:var(--cool)">豆包语音控制台</a>获取 App ID 和 Access Token。2.0 音色默认使用 seed-tts-2.0。</p>
+              <p class="settings-hint">在<a href="https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey" target="_blank" style="color:var(--cool)">火山方舟控制台</a>获取 API Key。音色默认使用 seed-tts-2.0。</p>
             </div>
 
             <div id="tts-creds-minimax" style="display:none;">

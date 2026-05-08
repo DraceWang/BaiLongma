@@ -143,6 +143,31 @@
 [data-enter="fade"].acui-enter-active { opacity: 1; }
 [data-exit="fade"].acui-exit-active   { opacity: 0; transition: opacity .2s; }
 
+/* flash-in / flash-out（天气通知专用：纯闪烁出场，无故障特效） */
+@keyframes acui-flash-in {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; }
+  32%  { opacity: 0.2; }
+  50%  { opacity: 1; }
+  65%  { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+@keyframes acui-flash-out {
+  0%   { opacity: 1; }
+  20%  { opacity: 0; }
+  40%  { opacity: 0.4; }
+  60%  { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+[data-enter="flash-in"] { opacity: 0; }
+[data-enter="flash-in"].acui-enter-active {
+  animation: acui-flash-in 0.45s ease forwards;
+}
+[data-exit="flash-out"].acui-exit-active {
+  animation: acui-flash-out 0.3s ease forwards;
+}
+
 /* stage-up / stage-down（媒体舞台）*/
 [data-enter="stage-up"] {
   transform: translateY(28px) scale(.97);

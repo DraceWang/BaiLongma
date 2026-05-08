@@ -85,10 +85,10 @@ $lockingPids = [RestartManager]::GetLockingPids($asarPath)
 if ($lockingPids.Count -gt 0) {
     Write-Host "[prebuild] app.asar is locked by these processes:" -ForegroundColor Yellow
     $closedNames = @()
-    foreach ($pid in $lockingPids) {
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    foreach ($procId in $lockingPids) {
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if ($proc) {
-            Write-Host "  -> PID $pid  $($proc.Name)  $($proc.MainWindowTitle)" -ForegroundColor Yellow
+            Write-Host "  -> PID $procId  $($proc.Name)  $($proc.MainWindowTitle)" -ForegroundColor Yellow
             $closedNames += $proc.Name
             # Ask the process to close first so it can save state.
             $proc.CloseMainWindow() | Out-Null
@@ -97,16 +97,16 @@ if ($lockingPids.Count -gt 0) {
 
     # Wait up to 6 seconds before forcing termination.
     $deadline = (Get-Date).AddSeconds(6)
-    foreach ($pid in $lockingPids) {
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    foreach ($procId in $lockingPids) {
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         while ($proc -and -not $proc.HasExited -and (Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 300
-            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         }
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if ($proc -and -not $proc.HasExited) {
-            Write-Host "  -> PID $pid did not exit; terminating" -ForegroundColor Red
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            Write-Host "  -> PID $procId did not exit; terminating" -ForegroundColor Red
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         }
     }
 

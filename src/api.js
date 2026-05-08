@@ -709,6 +709,7 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
           activated: status.activated,
           provider: status.provider,
           model: status.model,
+          baseURL: status.baseURL,
           models: status.models,
           temperature: config.temperature,
         },

@@ -1054,10 +1054,10 @@ body {
 
 /* ── Video mode button ── */
 .video-btn {
+  display: none;
   flex-shrink: 0;
   width: 28px;
   height: 28px;
-  display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--line-strong);
@@ -1104,7 +1104,8 @@ body {
 .settings-overlay[hidden] { display: none; }
 
 .settings-modal {
-  width: 560px;
+  width: 600px;
+  height: 560px;
   max-width: calc(100vw - 40px);
   max-height: calc(100vh - 80px);
   border-radius: 16px;
@@ -1311,6 +1312,25 @@ body {
 
 .settings-tab { display: none; }
 .settings-tab.active { display: block; }
+
+/* ── Custom scrollbars for settings ── */
+.settings-content::-webkit-scrollbar,
+.settings-nav::-webkit-scrollbar {
+  width: 4px;
+}
+.settings-content::-webkit-scrollbar-track,
+.settings-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.settings-content::-webkit-scrollbar-thumb,
+.settings-nav::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 2px;
+}
+.settings-content::-webkit-scrollbar-thumb:hover,
+.settings-nav::-webkit-scrollbar-thumb:hover {
+  background: var(--dim);
+}
 
 .settings-section-action {
   display: flex;
@@ -2087,6 +2107,7 @@ body.music-playing .music-vinyl {
 
 /* ── header music-btn ── */
 .music-btn {
+  display: none;
   background: none;
   border: none;
   cursor: pointer;
@@ -2095,7 +2116,6 @@ body.music-playing .music-vinyl {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  display: flex;
   align-items: center;
   justify-content: center;
   transition: color 0.18s ease, background 0.18s ease;

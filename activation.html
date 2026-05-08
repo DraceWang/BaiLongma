@@ -122,6 +122,43 @@
     .hint code {
       color: #9fcbff;
     }
+    .divider {
+      margin: 24px 0 0;
+      border: none;
+      border-top: 1px solid rgba(132, 161, 204, 0.14);
+    }
+    .custom-section {
+      margin-top: 20px;
+    }
+    .custom-section-label {
+      font-size: 12px;
+      color: #7a90a8;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .custom-hint {
+      margin: 0 0 16px;
+      font-size: 13px;
+      color: #7a90a8;
+    }
+    #settings-toggle {
+      display: block;
+      margin-top: 14px;
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 13px;
+      color: #6a82a0;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      text-decoration-color: rgba(106, 130, 160, 0.4);
+      transition: color 0.15s;
+      width: auto;
+    }
+    #settings-toggle:hover { color: #9db0c8; }
+    #settings-toggle.active { color: #74a8ff; }
   </style>
 </head>
 <body>
@@ -140,11 +177,36 @@
 
     <button id="activate" disabled>自动识别并进入</button>
     <div id="status" class="status"></div>
+    <button id="settings-toggle" type="button">或使用自定义端点（本地模型）</button>
 
     <p class="hint">
       激活信息会保存到本地 <code>config.json</code>，仅用于连接对应厂商的官方 API。
     </p>
+
+    <!-- 自定义端点（本地模型 / 其他兼容 OpenAI API 的端点） -->
+    <div id="custom-section" style="display:none;">
+      <hr class="divider">
+      <div class="custom-section">
+        <div class="custom-section-label">自定义端点</div>
+        <p class="custom-hint">Ollama、LM Studio 或其他兼容 OpenAI API 的本地/私有端点，API Key 可留空。</p>
+        <div class="row">
+          <label for="customBaseUrl">Base URL</label>
+          <input id="customBaseUrl" type="text" placeholder="如 http://localhost:11434/v1" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <label for="customModel">模型名称</label>
+          <input id="customModel" type="text" placeholder="如 llama3.2, qwen2.5, mistral" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <label for="customApiKey">API Key（可选）</label>
+          <input id="customApiKey" type="password" placeholder="本地模型可留空" autocomplete="off" spellcheck="false" />
+        </div>
+        <button id="activate-custom" disabled>测试连接并进入</button>
+        <div id="custom-status" class="status"></div>
+      </div>
+    </div>
   </main>
+
 
   <script>
     const ACTIVATION_WARMUP_KEY = 'bailongma_activation_warmup_until'
@@ -208,6 +270,68 @@
     })
     syncButtonState()
     apiKeyInput.focus()
+
+    // ── 自定义端点 ──
+    const settingsToggle = document.getElementById('settings-toggle')
+    const customSection  = document.getElementById('custom-section')
+    const customBaseUrlInput = document.getElementById('customBaseUrl')
+    const customModelInput   = document.getElementById('customModel')
+    const customApiKeyInput  = document.getElementById('customApiKey')
+    const customActivateBtn  = document.getElementById('activate-custom')
+    const customStatusEl     = document.getElementById('custom-status')
+
+    settingsToggle.addEventListener('click', () => {
+      const hidden = customSection.style.display === 'none'
+      customSection.style.display = hidden ? '' : 'none'
+      settingsToggle.classList.toggle('active', hidden)
+      if (hidden) customBaseUrlInput.focus()
+    })
+
+    function syncCustomButtonState() {
+      customActivateBtn.disabled =
+        !customBaseUrlInput.value.trim() || !customModelInput.value.trim()
+    }
+
+    function setCustomStatus(text, kind) {
+      customStatusEl.textContent = text
+      customStatusEl.className = 'status' + (kind ? ' ' + kind : '')
+    }
+
+    async function activateCustom() {
+      const baseURL = customBaseUrlInput.value.trim()
+      const model   = customModelInput.value.trim()
+      const apiKey  = customApiKeyInput.value.trim() || 'none'
+      if (!baseURL || !model) return
+
+      customActivateBtn.disabled = true
+      setCustomStatus('正在连接测试…')
+
+      try {
+        const resp = await fetch('/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'custom', baseURL, model, apiKey }),
+        })
+        const data = await resp.json().catch(() => ({}))
+        if (!resp.ok || !data.ok) {
+          setCustomStatus(data.error || '连接失败，请检查端点地址和模型名称', 'err')
+          syncCustomButtonState()
+          return
+        }
+        setCustomStatus(`激活成功：${data.model}`, 'ok')
+        setTimeout(() => window.location.replace('/brain-ui'), 700)
+      } catch (err) {
+        setCustomStatus('网络错误：' + err.message, 'err')
+        syncCustomButtonState()
+      }
+    }
+
+    customActivateBtn.addEventListener('click', activateCustom)
+    customBaseUrlInput.addEventListener('input', syncCustomButtonState)
+    customModelInput.addEventListener('input', syncCustomButtonState)
+    customModelInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !customActivateBtn.disabled) activateCustom()
+    })
   </script>
 </body>
 </html>

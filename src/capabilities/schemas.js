@@ -856,6 +856,63 @@ export const TOOL_SCHEMAS = {
       }
     }
   },
+
+  focus_banner: {
+    type: 'function',
+    function: {
+      name: 'focus_banner',
+      description: '在桌面显示一个半透明的专注横幅贴纸，提醒用户当前要专注完成的任务。当用户说"我要专心做某件事"、"进入专注模式"、"帮我专注做 X"时调用。横幅可展开显示任务列表，支持勾选完成。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['show', 'update', 'hide'],
+            description: 'show: 显示横幅；update: 更新内容（横幅已存在时）；hide: 关闭横幅'
+          },
+          task: {
+            type: 'string',
+            description: '主任务标题，一句话，简短'
+          },
+          current_step: {
+            type: 'string',
+            description: '当前正在执行的步骤（可选），折叠状态下显示在主任务下方'
+          },
+          tasks: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                text: { type: 'string', description: '子任务文字' },
+                done: { type: 'boolean', description: '是否已完成，默认 false' }
+              },
+              required: ['text']
+            },
+            description: '子任务列表，展开横幅后显示，可选'
+          }
+        },
+        required: ['action']
+      }
+    }
+  },
+
+  set_location: {
+    type: 'function',
+    function: {
+      name: 'set_location',
+      description: '记录用户当前所在城市或地区，用于天气查询等地理相关功能。当用户告知自己的位置（如"我在北京"、"我现在在上海"）时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          city: {
+            type: 'string',
+            description: '城市名称，如"北京"、"上海"、"London"'
+          }
+        },
+        required: ['city']
+      }
+    }
+  },
 }
 
 // 根据名称列表获取 schema 数组

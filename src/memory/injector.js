@@ -203,7 +203,7 @@ export async function runInjector({ message, state, hint = '' }) {
     'send_message', 'web_search', 'fetch_url', 'browser_read', 'list_dir', 'read_file', 'write_file',
     'delete_file', 'make_dir', 'exec_command', 'kill_process', 'list_processes',
     'set_tick_interval', 'media_mode', 'hotspot_mode', 'person_card_mode', 'manage_reminder', 'manage_prefetch_task',
-    'recall_memory', 'set_task', 'music', 'manage_app', 'ui_patch',
+    'recall_memory', 'set_task', 'music', 'manage_app', 'ui_patch', 'focus_banner', 'set_location',
   ]
   if (hasTask) {
     baseTools.push('complete_task', 'update_task_step')

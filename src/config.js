@@ -240,7 +240,13 @@ function readStoredConfig() {
     const raw = fs.readFileSync(paths.configFile, 'utf-8')
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return null
-    if (!parsed.provider || !PROVIDER_CONFIG[parsed.provider]) return null
+    if (!parsed.provider) return null
+    if (parsed.provider === 'custom') {
+      if (!parsed.baseURL || typeof parsed.baseURL !== 'string') return null
+      if (!parsed.model || typeof parsed.model !== 'string') return null
+      return parsed
+    }
+    if (!PROVIDER_CONFIG[parsed.provider]) return null
     if (!parsed.apiKey || typeof parsed.apiKey !== 'string') return null
     return parsed
   } catch {
@@ -289,7 +295,15 @@ function loadFromEnv() {
   return null
 }
 
-function applyConfig(provider, apiKey, model) {
+function applyConfig(provider, apiKey, model, customBaseURL) {
+  if (provider === 'custom') {
+    config.provider = 'custom'
+    config.model = String(model || '').trim()
+    config.apiKey = apiKey || 'none'
+    config.baseURL = String(customBaseURL || '').trim()
+    config.needsActivation = false
+    return
+  }
   const pConfig = PROVIDER_CONFIG[provider]
   config.provider = provider
   config.model = normalizeModel(model, provider)
@@ -310,7 +324,7 @@ export const config = {
 
 const stored = readStoredConfig()
 if (stored) {
-  applyConfig(stored.provider, stored.apiKey, stored.model)
+  applyConfig(stored.provider, stored.apiKey, stored.model, stored.baseURL)
   if (typeof stored.temperature === 'number' && stored.temperature >= 0 && stored.temperature <= 2) {
     config.temperature = stored.temperature
   }
@@ -332,8 +346,50 @@ if (stored) {
   } catch {}
 })()
 
-export async function activate({ provider = AUTO_PROVIDER, apiKey, model }) {
+export async function activate({ provider = AUTO_PROVIDER, apiKey, model, baseURL }) {
   const p = String(provider || AUTO_PROVIDER).toLowerCase()
+
+  if (p === 'custom') {
+    const normalizedBaseURL = String(baseURL || '').trim()
+    if (!normalizedBaseURL) throw new Error('自定义端点需要填写 Base URL')
+    const normalizedModel = String(model || '').trim()
+    if (!normalizedModel) throw new Error('自定义端点需要填写模型名称')
+    const normalizedKey = String(apiKey || '').trim() || 'none'
+
+    const { default: OpenAI } = await import('openai')
+    const client = new OpenAI({ apiKey: normalizedKey, baseURL: normalizedBaseURL, timeout: PROBE_TIMEOUT_MS })
+    try {
+      await withTimeout(
+        client.chat.completions.create({
+          model: normalizedModel,
+          messages: [{ role: 'user', content: 'Reply with exactly: hello' }],
+          max_tokens: 16,
+          temperature: 0,
+          stream: false,
+        }),
+        PROBE_TIMEOUT_MS,
+        'custom',
+      )
+    } catch (err) {
+      const message = err?.message || String(err)
+      throw new Error(`自定义端点连接失败: ${message}`)
+    }
+
+    applyConfig('custom', normalizedKey, normalizedModel, normalizedBaseURL)
+    writeStoredConfig({
+      provider: 'custom',
+      apiKey: normalizedKey,
+      model: normalizedModel,
+      baseURL: normalizedBaseURL,
+      activatedAt: new Date().toISOString(),
+    })
+    return {
+      provider: 'custom',
+      model: normalizedModel,
+      models: [{ id: normalizedModel, label: normalizedModel, deprecated: false }],
+    }
+  }
+
   const pConfig = PROVIDER_CONFIG[p]
   if (p !== AUTO_PROVIDER && !pConfig) {
     throw new Error(`不支持的 provider: "${p}"，可选: ${Object.keys(PROVIDER_CONFIG).join(', ')}`)
@@ -394,18 +450,20 @@ export async function activate({ provider = AUTO_PROVIDER, apiKey, model }) {
 }
 
 export function getActivationStatus() {
-  const pConfig = config.provider ? PROVIDER_CONFIG[config.provider] : null
+  const pConfig = config.provider && config.provider !== 'custom' ? PROVIDER_CONFIG[config.provider] : null
+  const customModels = config.model ? [{ id: config.model, label: config.model, deprecated: false }] : DEEPSEEK_MODELS
   return {
     activated: !config.needsActivation,
     provider: config.provider,
     model: config.model,
-    models: pConfig ? pConfig.models : DEEPSEEK_MODELS,
-    defaultModel: pConfig ? pConfig.defaultModel : DEFAULT_DEEPSEEK_MODEL,
+    baseURL: config.provider === 'custom' ? config.baseURL : undefined,
+    models: pConfig ? pConfig.models : customModels,
+    defaultModel: pConfig ? pConfig.defaultModel : (config.model || DEFAULT_DEEPSEEK_MODEL),
   }
 }
 
 export function getProviderSummaries() {
-  return Object.fromEntries(Object.entries(PROVIDER_CONFIG).map(([name, pConfig]) => [
+  const result = Object.fromEntries(Object.entries(PROVIDER_CONFIG).map(([name, pConfig]) => [
     name,
     {
       label: pConfig.label || name,
@@ -413,6 +471,8 @@ export function getProviderSummaries() {
       defaultModel: pConfig.defaultModel,
     },
   ]))
+  result.custom = { label: '自定义端点', models: [], defaultModel: '' }
+  return result
 }
 
 export function deactivate() {
@@ -428,6 +488,16 @@ export function deactivate() {
 
 export function switchModel(model) {
   if (!config.apiKey) throw new Error('尚未激活，无法切换模型')
+  if (config.provider === 'custom') {
+    const trimmed = String(model || '').trim()
+    if (!trimmed) throw new Error('模型名称不能为空')
+    config.model = trimmed
+    try {
+      const existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))
+      writeStoredConfig({ ...existing, model: trimmed })
+    } catch {}
+    return { provider: 'custom', model: trimmed }
+  }
   const normalized = normalizeModel(model, config.provider)
   config.model = normalized
   try {

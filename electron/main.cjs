@@ -5,10 +5,11 @@ if (process.platform === 'win32') {
   } catch (_) {}
 }
 
-const { app, BrowserWindow, shell, dialog, Menu, ipcMain, globalShortcut } = require('electron')
+const { app, BrowserWindow, shell, dialog, Menu, ipcMain, globalShortcut, Tray, nativeImage } = require('electron')
 const path = require('path')
 const net = require('net')
 const http = require('http')
+const { EventEmitter } = require('events')
 const { pathToFileURL } = require('url')
 const { autoUpdater } = require('electron-updater')
 
@@ -21,6 +22,12 @@ const BACKEND_ENTRY = path.join(CODE_ROOT, 'src', 'index.js')
 
 let mainWindow = null
 let backendPort = 0
+let tray = null
+let focusBannerWindow = null
+
+// 后端通过 global.focusBannerBridge 控制横幅窗口
+const focusBannerBridge = new EventEmitter()
+global.focusBannerBridge = focusBannerBridge
 
 if (process.platform === 'win32') {
   app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID)
@@ -132,10 +139,156 @@ async function createWindow() {
   })
 
   await mainWindow.loadURL(`http://127.0.0.1:${backendPort}/`)
+  // 关闭主窗口时最小化到托盘，不退出
+  mainWindow.on('close', (e) => {
+    if (!app.isQuiting) {
+      e.preventDefault()
+      mainWindow.hide()
+    }
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 }
+
+function setupTray() {
+  const iconPath = path.join(RESOURCE_ROOT, 'build', 'icon.ico')
+  tray = new Tray(nativeImage.createFromPath(iconPath))
+  tray.setToolTip('Bailongma')
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '显示主界面',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show()
+          mainWindow.focus()
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '退出',
+      click: () => {
+        app.isQuiting = true
+        app.quit()
+      },
+    },
+  ])
+
+  tray.setContextMenu(contextMenu)
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
+function createFocusBannerWindow({ task = '', current_step = '', tasks = [] } = {}) {
+  if (focusBannerWindow && !focusBannerWindow.isDestroyed()) {
+    focusBannerWindow.webContents.send('focus-banner:update', { task, current_step, tasks })
+    return
+  }
+
+  const { width: screenW } = require('electron').screen.getPrimaryDisplay().workAreaSize
+
+  focusBannerWindow = new BrowserWindow({
+    width: 280,
+    height: 60,
+    x: Math.round(screenW / 2 - 140),
+    y: 48,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    focusable: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'focus-banner-preload.cjs'),
+    },
+  })
+
+  // 给 banner 窗口的 session 也授权麦克风
+  focusBannerWindow.webContents.session.setPermissionRequestHandler((wc, permission, callback) => {
+    if (permission === 'media') return callback(true)
+    callback(false)
+  })
+  focusBannerWindow.webContents.session.setPermissionCheckHandler((wc, permission) => {
+    if (permission === 'media') return true
+    return false
+  })
+
+  focusBannerWindow.loadFile(path.join(RESOURCE_ROOT, 'focus-banner.html'))
+
+  focusBannerWindow.webContents.once('did-finish-load', () => {
+    if (!focusBannerWindow || focusBannerWindow.isDestroyed()) return
+    // 先发端口配置，让语音识别结果能发回后端
+    focusBannerWindow.webContents.send('focus-banner:config', { port: backendPort })
+    focusBannerWindow.webContents.send('focus-banner:update', { task, current_step, tasks })
+    autoResizeBannerWindow()
+  })
+
+  focusBannerWindow.on('closed', () => {
+    focusBannerWindow = null
+  })
+}
+
+function autoResizeBannerWindow() {
+  if (!focusBannerWindow || focusBannerWindow.isDestroyed()) return
+  focusBannerWindow.webContents.executeJavaScript(`
+    (() => {
+      const b = document.getElementById('banner')
+      return b ? { w: b.offsetWidth, h: b.offsetHeight } : null
+    })()
+  `).then(size => {
+    if (!size || !focusBannerWindow || focusBannerWindow.isDestroyed()) return
+    const padW = 0
+    const padH = 0
+    focusBannerWindow.setSize(Math.max(160, size.w + padW), Math.max(40, size.h + padH))
+  }).catch(() => {})
+}
+
+// Focus Banner IPC handlers
+ipcMain.on('focus-banner:close', () => {
+  if (focusBannerWindow && !focusBannerWindow.isDestroyed()) {
+    focusBannerWindow.close()
+    focusBannerWindow = null
+  }
+})
+
+ipcMain.on('focus-banner:set-expanded', (_e, { expanded }) => {
+  if (!focusBannerWindow || focusBannerWindow.isDestroyed()) return
+  setTimeout(() => autoResizeBannerWindow(), 50)
+})
+
+ipcMain.on('focus-banner:request-resize', () => {
+  setTimeout(() => autoResizeBannerWindow(), 30)
+})
+
+ipcMain.on('focus-banner:toggle-task', (_e, { idx, done }) => {
+  // 任务勾选状态更改，横幅已在前端自行更新，无需额外操作
+})
+
+// 后端 bridge 事件监听
+focusBannerBridge.on('command', ({ action, task, current_step, tasks }) => {
+  if (action === 'show' || action === 'update') {
+    createFocusBannerWindow({ task, current_step, tasks })
+  }
+})
+
+focusBannerBridge.on('hide', () => {
+  if (focusBannerWindow && !focusBannerWindow.isDestroyed()) {
+    focusBannerWindow.close()
+    focusBannerWindow = null
+  }
+})
 
 function setupAutoUpdater() {
   autoUpdater.autoDownload = true
@@ -236,8 +389,8 @@ app.on('second-instance', () => {
 })
 
 app.on('window-all-closed', () => {
-  globalShortcut.unregisterAll()
-  if (process.platform !== 'darwin') app.quit()
+  // 主窗口关闭后保持后台运行（Focus Banner 等桌面功能继续工作）
+  // 只有托盘菜单「退出」才真正退出
 })
 
 app.whenReady().then(async () => {
@@ -254,6 +407,7 @@ app.whenReady().then(async () => {
   }
 
   await createWindow()
+  setupTray()
   setupAutoUpdater()
 
   // F11 切换全屏

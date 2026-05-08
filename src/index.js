@@ -9,7 +9,7 @@ import { calculateNextDueAt, autoSpeakForVoiceReply } from './capabilities/execu
 import { popMessage, hasMessages, hasUserMessages, getQueueSnapshot, setInterruptCallback, requeueMessage, pushMessage } from './queue.js'
 import { startTUI } from './tui.js'
 import { startAPI } from './api.js'
-import { emitEvent } from './events.js'
+import { emitEvent, emitUICommand, addActiveUICard, hasACUIClient } from './events.js'
 import { formatTick, nowTimestamp, describeExistence } from './time.js'
 import { getAdaptiveTickInterval, getQuotaStatus, setRateLimited, isRateLimited, getTickInterval } from './quota.js'
 import { registerProvider } from './providers/registry.js'
@@ -23,6 +23,7 @@ import { startSocialConnectors } from './social/index.js'
 import { stopVoiceServer } from './voice/manager.js'
 import { buildHotspotRuntimeContext, buildHotspotPanelStateContext } from './hotspots.js'
 import { buildPersonCardRuntimeContext, buildPersonCardPanelStateContext } from './person-cards.js'
+import { buildWeatherRuntimeContext, getWeatherCardProps } from './weather.js'
 
 // 首次启动时把资源目录里的 sandbox 种子文件拷到用户数据目录（Electron 安装场景）
 seedSandboxOnce()
@@ -79,11 +80,34 @@ const state = {
   action: null,
   task: persistedTask || null,
   taskSteps: persistedTaskSteps,  // [{ text, status, note }]，status: pending/done/failed/skipped
+  taskIdleTickCount: 0,           // 连续空转 tick 计数（task 模式下无工具调用则累加）
   prev_recall: null,
   lastToolResult: null, // 上一轮工具调用结果，下一个 TICK 由注入器注入后清空
   sessionCounter: 0,
   recentActions: [], // 最近几轮的行动摘要，格式：{ ts, summary }
   thoughtStack: [],  // 念头栈，最多保留 3 个，格式：{ concept, line }
+}
+
+const TASK_IDLE_TICK_LIMIT = 5  // 连续 N 次 task tick 无工具调用则自动 clear
+
+function autoCompleteTask(reason) {
+  const clearedTask = state.task
+  state.task = null
+  state.taskSteps = []
+  state.taskIdleTickCount = 0
+  setConfig('current_task', '')
+  setConfig('current_task_steps', '[]')
+  console.log(`[任务] 自动清除（${reason}）：${clearedTask}`)
+  emitEvent('task_cleared', { task: clearedTask, summary: `自动清除：${reason}` })
+  if (clearedTask) {
+    insertMemory({
+      event_type: 'task_complete',
+      content: `任务已自动清除：${clearedTask.slice(0, 60)}`,
+      detail: `清除原因：${reason}`,
+      entities: [], concepts: [], tags: ['task_complete'],
+      timestamp: nowTimestamp(),
+    })
+  }
 }
 
 function newSessionRef() {
@@ -175,6 +199,7 @@ function buildToolContextForProcess(msg, injection) {
       const clearedTask = state.task
       state.task = null
       state.taskSteps = []
+      state.taskIdleTickCount = 0
       setConfig('current_task', '')
       setConfig('current_task_steps', '[]')
       console.log(`[任务] 已完成：${clearedTask}`)
@@ -196,6 +221,10 @@ function buildToolContextForProcess(msg, injection) {
       setConfig('current_task_steps', JSON.stringify(state.taskSteps))
       const done = state.taskSteps.filter(s => s.status === 'done').length
       emitEvent('task_step_updated', { index: idx, status, note, progress: `${done}/${state.taskSteps.length}` })
+      // 方案 C：全部步骤完成时自动清除任务
+      const terminal = ['done', 'failed', 'skipped']
+      const allTerminal = state.taskSteps.length > 0 && state.taskSteps.every(s => terminal.includes(s.status))
+      if (allTerminal) autoCompleteTask('所有步骤已完成')
       return {}
     },
 
@@ -326,6 +355,10 @@ function getProcessPriority(msg) {
   return typeof msg.priority === 'number' ? msg.priority : PRIORITY.background
 }
 
+function isVoiceChannel(channel) {
+  return channel === '语音识别' || channel === 'FocusBanner'
+}
+
 function isFastUserMessage(msg) {
   return !!msg && getProcessPriority(msg) >= PRIORITY.user
 }
@@ -440,7 +473,7 @@ async function process(input, label, msg = null) {
     if (fastUserPath) {
       directions.unshift('当前是外部用户的实时消息。优先尽快理解并通过 send_message 直接回应，不要先做耗时工具调用或深度上下文采集；只有在回复离不开时才调用较重工具。执行过程中，有值得说的进展或发现时随时 send_message 同步——不需要事先请示，能做的直接做，做的过程中有话说就说。')
     }
-    if (msg?.channel === '语音识别') {
+    if (isVoiceChannel(msg?.channel)) {
       directions.push('用户本条消息是通过语音输入的，系统会自动将你的回复转为语音播放。请用口语化、简短的方式回复（一两句话为宜），不要使用 Markdown 格式（无列表、无加粗、无标题）。如果内容较多，先口头简要说明，详细内容以文字展示即可。')
     }
 
@@ -454,6 +487,19 @@ async function process(input, label, msg = null) {
     const hotspotContextText = buildHotspotRuntimeContext(msg?.content || input)
     const personCardStateText = buildPersonCardPanelStateContext()
     const personCardContextText = buildPersonCardRuntimeContext(msg?.content || input)
+    const weatherContextText = await buildWeatherRuntimeContext(msg?.content || input)
+
+    // 天气关键词触发时，延迟 1 秒自动弹出 WeatherCard
+    if (weatherContextText && hasACUIClient()) {
+      setTimeout(() => {
+        getWeatherCardProps(msg?.content || input).then(cardProps => {
+          if (!cardProps) return
+          const id = `weathercard-${Date.now()}`
+          emitUICommand({ op: 'mount', id, component: 'WeatherCard', props: cardProps, hint: { placement: 'notification', enter: 'flash-in', exit: 'flash-out' } })
+          addActiveUICard(id, { component: 'WeatherCard' })
+        }).catch(() => {})
+      }, 1000)
+    }
 
     let extraContextText = ''
     if (state.task && !fastUserPath) {
@@ -531,7 +577,7 @@ async function process(input, label, msg = null) {
       hasActiveTask,
       task: state.task || null,
       taskKnowledge: taskKnowledgeText,
-      extraContext: [hotspotStateText, hotspotContextText, personCardStateText, personCardContextText, prefetchText, extraContextText, injection.uiSignalSummary, formatActiveUICards(injection.activeUICards)].filter(Boolean).join('\n\n'),
+      extraContext: [hotspotStateText, hotspotContextText, personCardStateText, personCardContextText, weatherContextText, prefetchText, extraContextText, injection.uiSignalSummary, formatActiveUICards(injection.activeUICards)].filter(Boolean).join('\n\n'),
       existenceDesc: describeExistence(birthTime),
     })
 
@@ -584,7 +630,7 @@ async function process(input, label, msg = null) {
             timestamp: nowTimestamp(),
           })
           // 用户用语音输入时，通知前端播放 TTS 语音回复
-          if (msg?.channel === '语音识别') {
+          if (isVoiceChannel(msg?.channel)) {
             autoSpeakForVoiceReply(cleanedContent)
           }
         }
@@ -642,7 +688,7 @@ async function process(input, label, msg = null) {
       const timestamp = nowTimestamp()
       const blockedContent = '我刚才没有真正调用工具完成这个操作，所以不能声称已经完成。请重新发送一次，我会先执行对应工具，再基于工具结果回复。'
       console.warn(`[协议兜底] 阻止了一次需要工具但未调用工具的文本回复。from=${msg.fromId}`)
-      if (msg.channel === '语音识别') autoSpeakForVoiceReply(blockedContent)
+      if (isVoiceChannel(msg.channel)) autoSpeakForVoiceReply(blockedContent)
       emitEvent('message', {
         from: 'consciousness',
         to: msg.fromId,
@@ -671,7 +717,7 @@ async function process(input, label, msg = null) {
     } else if (fallbackContent) {
       const timestamp = nowTimestamp()
       console.warn(`[协议兜底] 模型未调用 send_message，已将正文发给 ${msg.fromId}`)
-      if (msg.channel === '语音识别') autoSpeakForVoiceReply(fallbackContent)
+      if (isVoiceChannel(msg.channel)) autoSpeakForVoiceReply(fallbackContent)
       emitEvent('message', {
         from: 'consciousness',
         to: msg.fromId,
@@ -740,6 +786,7 @@ async function process(input, label, msg = null) {
     console.log(`[系统] 任务完成：${clearedTask}`)
     emitEvent('task_cleared', { task: clearedTask })
     state.task = null
+    state.taskIdleTickCount = 0
     setConfig('current_task', '')
     // 写入 task_complete 记忆，防止后续注入时旧任务记忆让 Jarvis 误以为任务仍在进行
     if (clearedTask) {
@@ -764,6 +811,19 @@ async function process(input, label, msg = null) {
     }).join(', ')
     state.recentActions.push({ ts: nowTimestamp(), summary })
     if (state.recentActions.length > 5) state.recentActions.shift()
+  }
+
+  // 方案 B：task 空转检测——连续 N 次 tick 无工具调用则自动清除
+  if (state.task && isTick) {
+    if (toolCallLog.length === 0) {
+      state.taskIdleTickCount++
+      console.log(`[任务] 空转计数 ${state.taskIdleTickCount}/${TASK_IDLE_TICK_LIMIT}`)
+      if (state.taskIdleTickCount >= TASK_IDLE_TICK_LIMIT) {
+        autoCompleteTask(`连续 ${TASK_IDLE_TICK_LIMIT} 次 tick 无工具调用`)
+      }
+    } else {
+      state.taskIdleTickCount = 0
+    }
   }
 
   // 6. 识别器：分离 think 块和正文，传入完整经历

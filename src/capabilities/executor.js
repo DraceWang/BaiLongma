@@ -13,6 +13,7 @@ import { isDailyLimitReached } from '../quota.js'
 import { setCustomInterval as setTickerInterval, getStatus as getTickerStatus } from '../ticker.js'
 import { setHotspotPanelState, getHotspotPanelState } from '../hotspots.js'
 import { setPersonCardPanelState, getPersonCardPanelState, getPersonCard } from '../person-cards.js'
+import { setUserLocation } from '../weather.js'
 
 // 后台进程注册表：pid → { process, command, startedAt }
 const bgProcesses = new Map()
@@ -357,6 +358,10 @@ async function executeToolUnchecked(name, args, context = {}) {
         return execManageApp(args)
       case 'ui_register':
         return execUIRegister(args)
+      case 'focus_banner':
+        return execFocusBanner(args)
+      case 'set_location':
+        return execSetLocation(args)
       case 'set_task':
         return execSetTask(args, context)
       case 'complete_task':
@@ -2338,6 +2343,32 @@ function execUpdateTaskStep({ step_index, status, note = '' }, context) {
   if (result?.error) return `错误：${result.error}`
   const statusLabel = { done: '完成 ✓', failed: '失败 ✗', skipped: '跳过 —' }[status]
   return `步骤 ${idx + 1} 已标记为${statusLabel}${note ? '：' + note : ''}`
+}
+
+function execFocusBanner({ action, task = '', current_step = '', tasks = [] }) {
+  if (!['show', 'update', 'hide'].includes(action)) {
+    return toolJson({ ok: false, error: 'action 必须是 show / update / hide' })
+  }
+  const bridge = global.focusBannerBridge
+  if (!bridge) {
+    return toolJson({ ok: false, error: '桌面功能不可用（非 Electron 环境）' })
+  }
+  if (action === 'hide') {
+    bridge.emit('hide')
+    return toolJson({ ok: true, action: 'hide', message: '专注横幅已关闭' })
+  }
+  const cleanTasks = Array.isArray(tasks)
+    ? tasks.map(t => ({ text: String(t.text || ''), done: !!t.done }))
+    : []
+  bridge.emit('command', { action, task: String(task), current_step: String(current_step), tasks: cleanTasks })
+  return toolJson({ ok: true, action, task, current_step, tasks: cleanTasks })
+}
+
+function execSetLocation({ city }) {
+  const loc = String(city || '').trim()
+  if (!loc) return toolJson({ ok: false, error: '城市名称不能为空' })
+  setUserLocation(loc)
+  return toolJson({ ok: true, city: loc, message: `位置已更新为：${loc}` })
 }
 
 async function execRecallMemory({ query }, context) {
