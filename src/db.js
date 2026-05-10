@@ -51,6 +51,7 @@ function initSchema() {
       from_id     TEXT    NOT NULL,  -- 发送者 ID
       to_id       TEXT,              -- 接收者 ID（jarvis 发出时有值）
       content     TEXT    NOT NULL,
+      channel     TEXT    NOT NULL DEFAULT '',
       timestamp   TEXT    NOT NULL,
       created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
     );
@@ -58,6 +59,7 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_conv_timestamp ON conversations(timestamp);
     CREATE INDEX IF NOT EXISTS idx_conv_from_id   ON conversations(from_id);
   `)
+  try { db.exec(`ALTER TABLE conversations ADD COLUMN channel TEXT DEFAULT ''`) } catch {}
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS memories (

@@ -20,10 +20,10 @@ import { seedSandboxOnce } from './paths.js'
 import { ensureSkillMemories } from './memory/seed-skills.js'
 import { dispatchSocialMessage } from './social/dispatch.js'
 import { startSocialConnectors } from './social/index.js'
-import { stopVoiceServer } from './voice/manager.js'
 import { buildHotspotRuntimeContext, buildHotspotPanelStateContext } from './hotspots.js'
 import { buildPersonCardRuntimeContext, buildPersonCardPanelStateContext } from './person-cards.js'
 import { buildWeatherRuntimeContext, getWeatherCardProps } from './weather.js'
+import { buildDocRuntimeContext, buildDocPanelStateContext, detectDocTopic, setDocPanelState } from './docs.js'
 
 // 首次启动时把资源目录里的 sandbox 种子文件拷到用户数据目录（Electron 安装场景）
 seedSandboxOnce()
@@ -37,6 +37,11 @@ const PRIORITY = {
   background: 50,
   user: 100,
 }
+
+const PRIMARY_USER_ID = 'ID:000001'
+const L2_CONTEXT_HOURS = 24 * 7
+const STARTUP_SELF_CHECK_VERSION = 'v1'
+const STARTUP_SELF_CHECK_CONFIG_KEY = 'l2_startup_self_check'
 
 // 初始化数据库
 getDB()
@@ -86,6 +91,7 @@ const state = {
   sessionCounter: 0,
   recentActions: [], // 最近几轮的行动摘要，格式：{ ts, summary }
   thoughtStack: [],  // 念头栈，最多保留 3 个，格式：{ concept, line }
+  startupSelfCheck: null,
 }
 
 const TASK_IDLE_TICK_LIMIT = 5  // 连续 N 次 task tick 无工具调用则自动 clear
@@ -113,6 +119,58 @@ function autoCompleteTask(reason) {
 function newSessionRef() {
   state.sessionCounter++
   return `session_${Date.now()}_${state.sessionCounter}`
+}
+
+function readStartupSelfCheckState() {
+  try {
+    const raw = getConfig(STARTUP_SELF_CHECK_CONFIG_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function writeStartupSelfCheckState(value) {
+  setConfig(STARTUP_SELF_CHECK_CONFIG_KEY, JSON.stringify(value))
+}
+
+function ensureStartupSelfCheckState() {
+  const current = readStartupSelfCheckState()
+  if (current?.version === STARTUP_SELF_CHECK_VERSION && current.status === 'completed') {
+    state.startupSelfCheck = { ...current, active: false }
+    return state.startupSelfCheck
+  }
+
+  const now = nowTimestamp()
+  const next = {
+    version: STARTUP_SELF_CHECK_VERSION,
+    status: 'running',
+    started_at: current?.started_at || now,
+    updated_at: now,
+    attempts: Number(current?.attempts || 0) + (current?.status === 'running' ? 0 : 1),
+    results: current?.version === STARTUP_SELF_CHECK_VERSION && current?.results ? current.results : {},
+    active: true,
+  }
+  writeStartupSelfCheckState(next)
+  state.startupSelfCheck = next
+  return next
+}
+
+function buildStartupSelfCheckDirections(checkState) {
+  if (!checkState?.active) return ''
+  return [
+    `当前是 L2 启动自检流程（${STARTUP_SELF_CHECK_VERSION}）。这是一次性流程；完成后必须调用 complete_startup_self_check 记录结果，以后不再重复检查。`,
+    `自检目标：探索运行环境和关键能力，但不要骚扰用户。除非发现严重问题，否则不要主动 send_message；过程展示在 L2 面板和工具日志即可。`,
+    `必须按顺序执行，并且每个 UI 能力都要先打开/展示，确认工具返回，再关闭，然后才能进行下一项：`,
+    `1. 文件环境：list_dir/read_file 是 sandbox 范围内的只读文件工具。用 list_dir 探索 sandbox 根目录及其可见子目录（例如 articles、lyrics、music、downloads、notes 等实际存在的目录），只读探索，不要写文件；如果某个目录不存在，记录 skipped_missing_dir。`,
+    `2. 上网能力：用 web_search 做一个低风险连通性查询，记录 ok/error。`,
+    `3. 热点面板：hotspot_mode show/open，确认返回后 hotspot_mode hide/close。`,
+    `4. 音乐能力：先 music scan 或 music list；如果有曲目，用 media_mode mode=music action=show/play 展示播放器，然后 media_mode mode=music action=hide/close；没有曲目则记录 skipped_no_tracks。不要下载音乐。`,
+    `5. 专注横幅：focus_banner show 展示一个短测试任务，确认返回后 focus_banner hide。`,
+    `6. UI 卡片：优先用 ui_show_inline 创建一个极简测试卡片，拿到 id 后必须 ui_hide；如果没有 UI 客户端，记录 skipped_no_ui_client。不要注册永久组件。`,
+    `结果记录规则：每项结果使用 ok、degraded、error 或 skipped_*。即使某项失败，也继续后续项目；最后调用 complete_startup_self_check，传入 summary 和 results 对象。`,
+  ].join('\n')
 }
 
 function trimAssistantFluff(content) {
@@ -167,9 +225,9 @@ export function buildToolContext({ currentTargetId = null, conversationWindow = 
     ...conversationWindow.flatMap(item => [item.from_id, item.to_id]),
   ].filter(id => id && id !== 'jarvis')
 
-  // TICK 场景：补充"最近 24h 有过双向对话的熟人"，让意识体可主动联系已建立连接的对象
+  // TICK 场景：补充近期熟人和主用户，让意识体可主动联系已建立连接的对象。
   if (includeRecentPartners && !currentTargetId) {
-    visibleTargetIds.push(...getRecentConversationPartners(24, 20))
+    visibleTargetIds.push(PRIMARY_USER_ID, ...getRecentConversationPartners(L2_CONTEXT_HOURS, 20))
   }
 
   const unique = [...new Set(visibleTargetIds.filter(Boolean))]
@@ -228,6 +286,34 @@ function buildToolContextForProcess(msg, injection) {
       return {}
     },
 
+    startupSelfCheck: state.startupSelfCheck,
+    onCompleteStartupSelfCheck: ({ summary = '', results = {} } = {}) => {
+      const now = nowTimestamp()
+      const completed = {
+        version: STARTUP_SELF_CHECK_VERSION,
+        status: 'completed',
+        started_at: state.startupSelfCheck?.started_at || now,
+        completed_at: now,
+        updated_at: now,
+        results,
+        summary,
+      }
+      writeStartupSelfCheckState(completed)
+      state.startupSelfCheck = { ...completed, active: false }
+      insertMemory({
+        mem_id: `system_l2_startup_self_check_${STARTUP_SELF_CHECK_VERSION}`,
+        type: 'system',
+        title: `L2 startup self-check ${STARTUP_SELF_CHECK_VERSION}`,
+        content: `L2 启动自检已完成：${summary || '无摘要'}`,
+        detail: JSON.stringify({ summary, results }, null, 2),
+        tags: ['system', 'l2', 'startup_self_check', STARTUP_SELF_CHECK_VERSION],
+        entities: [],
+        timestamp: now,
+      })
+      emitEvent('startup_self_check_completed', completed)
+      return completed
+    },
+
     onRecall: (query) => {
       state.prev_recall = query
     },
@@ -242,16 +328,26 @@ function formatConversationMessage(row, currentMsg = null) {
     }
   }
 
+  // 时间戳只保留到分钟（去掉秒和时区）
+  const ts = row.timestamp ? row.timestamp.slice(0, 16).replace('T', ' ') : ''
+  const channel = row.channel || currentMsg?.channel || ''
+
+  const isSystemSignal = row.from_id === 'SYSTEM' || channel === 'APP_SIGNAL' || channel === 'REMINDER'
+
+  if (isSystemSignal) {
+    const channelLabel = channel ? ` · ${channel}` : ''
+    return {
+      role: 'user',
+      content: `[system signal · ${ts}${channelLabel}]\n${row.content || ''}\n(Respond with tools only. Do NOT call send_message.)`.trim(),
+    }
+  }
+
   const isCurrent = currentMsg
     && row.role === 'user'
     && row.from_id === currentMsg.fromId
     && row.timestamp === currentMsg.timestamp
     && row.content === currentMsg.content
   const marker = isCurrent ? 'current user message' : 'user message'
-
-  // 时间戳只保留到分钟（去掉秒和时区）
-  const ts = row.timestamp ? row.timestamp.slice(0, 16).replace('T', ' ') : ''
-  const channel = row.channel || (isCurrent && currentMsg?.channel) || ''
   // TUI/API 是默认渠道，不显示；只显示有意义的渠道
   const channelLabel = (channel && channel !== 'TUI' && channel !== 'API') ? ` · ${channel}` : ''
 
@@ -465,16 +561,37 @@ async function process(input, label, msg = null) {
       controller,
     })
 
+    if (isTick) ensureStartupSelfCheckState()
+
     // 1. 注入器
     const injection = await runInjector({ message: input, state })
     throwIfAborted(controller.signal)
 
     const directions = [...(injection.directions || [])]
+    if (isTick) {
+      directions.unshift(
+        `当前是 L2 自主心跳轮次，没有新的用户消息。你拥有完整工具权限，可以主动行动——不需要等用户发起。\n` +
+        `你可以主动做的事（示例，不限于此）：\n` +
+        `- 根据时间段（早晨/晚上/深夜）主动问候或关心用户\n` +
+        `- 查看 sandbox 文件夹，检查进行中的项目或文件变化，必要时汇报\n` +
+        `- 搜索记忆库，找出有未完成承诺、待跟进事项或到期提醒，主动推进\n` +
+        `- 发现近期对话里有值得延伸的话题，主动分享一个想法或信息\n` +
+        `- 网络搜索用户感兴趣的内容，把有价值的发现推送给用户\n` +
+        `- 检查任务进度或 prefetch 数据（天气/新闻），有变化时主动告知\n` +
+        `行动准则：\n` +
+        `- 主动但不骚扰：不重复说刚说过的话，不在深夜无故打扰（23:00–06:00 只在有明确价值时才发消息）\n` +
+        `- 有实质内容：发消息前确保有真正值得说的东西，不要只是"打个招呼"\n` +
+        `- 不需要全部都做：每轮选一件最有价值的事做，做完即可，不要在单轮里堆砌多个行动\n` +
+        `- 如果确实没有值得做的事，可以静默，不调用任何工具`
+      )
+      const startupSelfCheckDirections = buildStartupSelfCheckDirections(state.startupSelfCheck)
+      if (startupSelfCheckDirections) directions.unshift(startupSelfCheckDirections)
+    }
     if (fastUserPath) {
-      directions.unshift('当前是外部用户的实时消息。优先尽快理解并通过 send_message 直接回应，不要先做耗时工具调用或深度上下文采集；只有在回复离不开时才调用较重工具。执行过程中，有值得说的进展或发现时随时 send_message 同步——不需要事先请示，能做的直接做，做的过程中有话说就说。')
+      directions.unshift('Current turn is a real-time external user message. Understand it quickly and reply directly with send_message before doing slow tools or deep context gathering. Use heavier tools only when the reply depends on them. During execution, whenever there is meaningful progress or a useful finding, send_message to keep the user in the loop. Do not ask for permission for actions you can safely perform; act, and speak when there is something worth saying.')
     }
     if (isVoiceChannel(msg?.channel)) {
-      directions.push('用户本条消息是通过语音输入的，系统会自动将你的回复转为语音播放。请用口语化、简短的方式回复（一两句话为宜），不要使用 Markdown 格式（无列表、无加粗、无标题）。如果内容较多，先口头简要说明，详细内容以文字展示即可。')
+      directions.push('The current user message came from voice input. Speak naturally and concisely — like talking to a person, not writing an article. Get to the point, avoid filler phrases, and do not use Markdown formatting (no bullet points, asterisks, or headers). Say what needs to be said and stop.')
     }
 
     const memoriesText = formatMemoriesForPrompt(injection.memories, injection.recallMemories)
@@ -488,6 +605,10 @@ async function process(input, label, msg = null) {
     const personCardStateText = buildPersonCardPanelStateContext()
     const personCardContextText = buildPersonCardRuntimeContext(msg?.content || input)
     const weatherContextText = await buildWeatherRuntimeContext(msg?.content || input)
+    // 关键词检测只作为软提示注入上下文，由 Agent 自己判断是否需要打开文档面板
+    const detectedDocTopic = detectDocTopic(msg?.content || input)
+    const docStateText = buildDocPanelStateContext(detectedDocTopic)
+    const docContextText = buildDocRuntimeContext(msg?.content || input)
 
     // 天气关键词触发时，延迟 1 秒自动弹出 WeatherCard
     if (weatherContextText && hasACUIClient()) {
@@ -577,7 +698,7 @@ async function process(input, label, msg = null) {
       hasActiveTask,
       task: state.task || null,
       taskKnowledge: taskKnowledgeText,
-      extraContext: [hotspotStateText, hotspotContextText, personCardStateText, personCardContextText, weatherContextText, prefetchText, extraContextText, injection.uiSignalSummary, formatActiveUICards(injection.activeUICards)].filter(Boolean).join('\n\n'),
+      extraContext: [hotspotStateText, hotspotContextText, personCardStateText, personCardContextText, weatherContextText, docStateText, docContextText, prefetchText, extraContextText, injection.uiSignalSummary, formatActiveUICards(injection.activeUICards)].filter(Boolean).join('\n\n'),
       existenceDesc: describeExistence(birthTime),
     })
 
@@ -967,7 +1088,7 @@ async function startConsciousnessLoop({ runImmediateTick = true } = {}) {
     triggerImmediateTick()
   })
 
-  // 激活刚完成时不要立刻打一发 L2 TICK，避免和激活校验/用户首条消息争抢配额。
+  // 是否立即打一发 L2 TICK 由调用方决定；首次激活会用它触发启动自检。
   if (runImmediateTick) {
     await onTick()
   }
@@ -1005,13 +1126,10 @@ async function main() {
     onActivated: () => {
       console.log(`[LLM] 激活成功：${config.provider}（${config.model}）`)
       registerMinimaxIfAvailable()
-      startConsciousnessLoop({ runImmediateTick: false }).catch(err => console.error('[系统] 主循环启动失败:', err))
+      startConsciousnessLoop({ runImmediateTick: true }).catch(err => console.error('[系统] 主循环启动失败:', err))
     },
   })
   startSocialConnectors({ pushMessage, emitEvent }).catch(err => console.warn('[social] startup failed:', err.message))
-
-  // 语音服务不再自动启动，由用户在设置 → 语音识别 → 本地 Whisper 中手动开启
-  globalThis.process.on('exit', () => { try { stopVoiceServer() } catch {} })
 
   // 启动 TUI
   startTUI('ID:000001')

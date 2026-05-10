@@ -1,5 +1,6 @@
 import { createHotspotPanel } from './hotspot-panel.js';
 import { createPersonCardPanel } from './person-card-panel.js';
+import { createDocPanel } from './doc-panel.js';
 
 const createGraphStage = () => `
 <div class="grid-overlay"></div>
@@ -438,7 +439,11 @@ const createSettingsModal = () => `
             </div>
 
             <div id="tts-creds-minimax" style="display:none;">
-              <p class="settings-hint">复用 LLM 设置中的 MiniMax API Key，无需单独配置。可用声音：male-qn-qingse · male-qn-jingying · female-shaonv · female-yujie · presenter_female 等。</p>
+              <div class="settings-row">
+                <label class="settings-label" for="tts-minimax-key">MiniMax API Key</label>
+                <input class="settings-input" type="password" id="tts-minimax-key" placeholder="留空则不修改（可与 LLM 共用）">
+              </div>
+              <p class="settings-hint">可用声音：male-qn-qingse · male-qn-jingying · female-shaonv · female-yujie · presenter_female 等。</p>
             </div>
 
             <div id="tts-creds-openai">
@@ -597,6 +602,7 @@ export function createBrainUiMarkup() {
     createImagePanel(),
     createHotspotPanel(),
     createPersonCardPanel(),
+    createDocPanel(),
   ].join("\n\n");
 }
 

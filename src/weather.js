@@ -162,9 +162,9 @@ export async function buildWeatherRuntimeContext(message = '') {
     ? Math.round((Date.now() - result.fetchedAt) / 60000)
     : 0
 
-  return `## 天气参考信息
-以下是系统自动拉取的实时天气，仅作背景参考，不要求主动朗读或总结，按需引用即可。
-数据时间：约 ${age} 分钟前（每 30 分钟刷新）
+  return `## Weather Reference
+The following live weather was automatically fetched by the system. Treat it only as background context; do not proactively read or summarize it. Cite it only when useful.
+Data age: about ${age} minutes (refreshed every 30 minutes)
 
 ${result.formatted}`
 }

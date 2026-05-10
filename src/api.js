@@ -15,15 +15,16 @@ import { paths } from './paths.js'
 import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries } from './config.js'
 import { streamTTS, TTS_PROVIDERS, TTS_VOICES } from './voice/tts-providers.js'
 import { restartConnector } from './social/index.js'
+// manager.js (Whisper local server) removed
 import { replaceProvider } from './providers/registry.js'
 import { persistAppState } from './capabilities/executor.js'
 import { MinimaxProvider } from './providers/minimax.js'
 import { handleSocialWebhook, isSocialWebhookPath } from './social/webhooks.js'
 import { getClawbotQR, logoutClawbot } from './social/wechat-clawbot.js'
-import { startVoiceServer, stopVoiceServer, getVoiceStatus, restartVoiceServer } from './voice/manager.js'
 import { createCloudASRSession } from './voice/cloud-asr.js'
 import { getHotspots, setHotspotPanelState, getHotspotPanelState } from './hotspots.js'
 import { getPersonCard, setPersonCardPanelState, getPersonCardPanelState } from './person-cards.js'
+import { setDocPanelState, getDocPanelState, DOC_TOPICS } from './docs.js'
 
 export { emitEvent }
 
@@ -500,6 +501,46 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       }
     }
 
+    // GET /doc-panel-state — 文档面板状态
+    // POST /doc-panel-state — 设置文档面板状态 { active, topicId, source }
+    if (url.pathname === '/doc-panel-state') {
+      if (req.method === 'GET') {
+        jsonResponse(res, 200, { ok: true, state: getDocPanelState() })
+        return
+      }
+      if (req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => {
+            const active = typeof body.active === 'boolean'
+              ? body.active
+              : /^(1|true|yes|open|show)$/i.test(String(body.active || ''))
+            const state = setDocPanelState({ active, topicId: body.topicId || null, source: body.source || 'brain-ui' })
+            jsonResponse(res, 200, { ok: true, state })
+          })
+          .catch((err) => jsonResponse(res, 400, { ok: false, error: err.message }))
+        return
+      }
+    }
+
+    // GET /docs/:topicId — 获取指定文档主题内容
+    if (req.method === 'GET' && url.pathname.startsWith('/docs/')) {
+      const topicId = url.pathname.slice(6)
+      const doc = DOC_TOPICS[topicId]
+      if (!doc) {
+        jsonResponse(res, 404, { ok: false, error: `unknown topic: ${topicId}` })
+        return
+      }
+      jsonResponse(res, 200, { ok: true, doc })
+      return
+    }
+
+    // GET /docs — 所有文档主题列表
+    if (req.method === 'GET' && url.pathname === '/docs') {
+      const topics = Object.values(DOC_TOPICS).map(({ id, title, subtitle, icon, summary }) => ({ id, title, subtitle, icon, summary }))
+      jsonResponse(res, 200, { ok: true, topics })
+      return
+    }
+
     if (req.method === 'GET' && url.pathname === '/person-card') {
       const name = url.searchParams.get('name') || url.searchParams.get('q') || ''
       jsonResponse(res, 200, { ok: true, card: getPersonCard(name) })
@@ -685,8 +726,8 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       req.on('end', async () => {
         try {
           const body = Buffer.concat(chunks).toString('utf-8')
-          const { apiKey, model, provider } = JSON.parse(body || '{}')
-          const info = await activateLLM({ provider, apiKey, model })
+          const { apiKey, model, provider, baseURL } = JSON.parse(body || '{}')
+          const info = await activateLLM({ provider, apiKey, model, baseURL })
           emitEvent('activated', info)
           // 通知 index.js 启动主循环
           if (typeof onActivatedCallback === 'function') {
@@ -1025,36 +1066,6 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       return
     }
 
-    // GET /voice/status — 语音服务状态
-    if (req.method === 'GET' && url.pathname === '/voice/status') {
-      jsonResponse(res, 200, { ok: true, voice: getVoiceStatus() })
-      return
-    }
-
-    // POST /voice/start — 启动语音服务 { model: 'base' }
-    if (req.method === 'POST' && url.pathname === '/voice/start') {
-      const chunks = []
-      req.on('data', chunk => chunks.push(chunk))
-      req.on('end', () => {
-        try {
-          const body = Buffer.concat(chunks).toString('utf-8')
-          const { model = 'turbo' } = body ? JSON.parse(body) : {}
-          const result = startVoiceServer({ model })
-          jsonResponse(res, 200, { ok: true, voice: result })
-        } catch (err) {
-          jsonResponse(res, 400, { ok: false, error: err.message })
-        }
-      })
-      return
-    }
-
-    // POST /voice/stop — 停止语音服务
-    if (req.method === 'POST' && url.pathname === '/voice/stop') {
-      const result = stopVoiceServer()
-      jsonResponse(res, 200, { ok: true, voice: result })
-      return
-    }
-
     // GET /settings/voice — 读取语音配置（凭证只返回 configured 状态）
     if (req.method === 'GET' && url.pathname === '/settings/voice') {
       jsonResponse(res, 200, { ok: true, voice: getVoiceConfig() })
@@ -1069,8 +1080,6 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
           setVoiceConfig(body)
-          // 若更换了 Whisper 模型，热重启语音服务
-          if (body.whisperModel) restartVoiceServer(body.whisperModel)
           jsonResponse(res, 200, { ok: true, voice: getVoiceConfig() })
         } catch (err) {
           jsonResponse(res, 400, { ok: false, error: err.message })
@@ -1112,7 +1121,7 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
           if (!text?.trim()) { jsonResponse(res, 400, { ok: false, error: '缺少 text 参数' }); return }
           const creds = getTTSCredentials()
           const audioStream = await streamTTS({
-            text: text.slice(0, 500),
+            text: text.slice(0, 800),
             provider: creds.provider,
             voiceId:  body.voiceId || creds.voiceId || undefined,
             keys: {
@@ -1214,7 +1223,7 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
             const preview = msg.payload?.render_preview || ''
             if (preview && /font-size|rgba\(|<span|<\/[a-z]|px;|z-index|text-shadow/.test(preview)) {
               pushMessage('SYSTEM',
-                `[渲染异常 app=${msg.target || 'unknown'}]\n组件挂载后文本内容疑似包含未渲染的 HTML/CSS，请立刻检查代码并用 ui_hide + ui_show_inline 重新生成：\n${preview.slice(0, 200)}`,
+                `[Render anomaly app=${msg.target || 'unknown'}]\nAfter mounting, the component text appears to contain unrendered HTML/CSS. Check the code immediately, then regenerate it with ui_hide + ui_show_inline:\n${preview.slice(0, 200)}`,
                 'APP_SIGNAL')
             }
           }

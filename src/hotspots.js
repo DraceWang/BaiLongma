@@ -55,11 +55,11 @@ export function getHotspotPanelState() {
 
 export function buildHotspotPanelStateContext() {
   const state = getHotspotPanelState()
-  const status = state.active ? '开启' : '关闭'
-  const ttl = state.contextActive ? `热点上下文 TTL 剩余约 ${Math.ceil(state.contextTtlSeconds / 60)} 分钟` : '当前没有有效热点上下文 TTL'
-  return `## 热点面板状态
-当前热点面板：${status}。${ttl}。
-如确有展示、演示、排查或用户明确要求，可使用 hotspot_mode 工具打开或关闭热点面板；平时不要为了普通回答主动打开。`
+  const status = state.active ? 'open' : 'closed'
+  const ttl = state.contextActive ? `Hotspot context TTL has about ${Math.ceil(state.contextTtlSeconds / 60)} minutes remaining` : 'No active hotspot context TTL'
+  return `## Hotspot Panel State
+Current hotspot panel: ${status}. ${ttl}.
+Use the hotspot_mode tool to open or close the hotspot panel only when display, demo, troubleshooting, or an explicit user request calls for it. Do not open it proactively for ordinary answers.`
 }
 
 function readHotspotConfig() {
@@ -257,23 +257,23 @@ function persistMentionedHotspot(match, message = '') {
   const timestamp = nowTimestamp()
   const concepts = [...new Set([title, platformLabel(item.platform), ...(match.keywords || [])])].filter(Boolean).slice(0, 16)
   const source = item.source || 'hotspot-api'
-  const content = `用户提到了近期热点：${title}`
+  const content = `The user mentioned a recent hotspot: ${title}`
   const detail = [
-    `热点来源：${source}`,
-    `平台：${platformLabel(item.platform)}`,
-    `排名：${item.rank || '未知'}`,
-    item.heat ? `热度：${item.heat}` : '',
-    item.tag ? `标签：${item.tag}` : '',
-    item.url ? `链接：${item.url}` : '',
-    cache?.fetchedAt ? `抓取时间：${cache.fetchedAt}` : '',
-    `触发消息摘录：${String(message || '').slice(0, 120)}`,
-    '这是程序自动归档的热点事件事实。若后续对话产生用户偏好、判断或事件进展，Agent 可以用 upsert_memory 更新同一个 mem_id。',
+    `Hotspot source: ${source}`,
+    `Platform: ${platformLabel(item.platform)}`,
+    `Rank: ${item.rank || 'unknown'}`,
+    item.heat ? `Heat: ${item.heat}` : '',
+    item.tag ? `Tag: ${item.tag}` : '',
+    item.url ? `Link: ${item.url}` : '',
+    cache?.fetchedAt ? `Fetched at: ${cache.fetchedAt}` : '',
+    `Trigger message excerpt: ${String(message || '').slice(0, 120)}`,
+    'This is an automatically archived hotspot-event fact. If later conversation adds user preferences, judgments, or event progress, the agent may update the same mem_id with upsert_memory.',
   ].filter(Boolean).join('\n')
 
   return upsertMemoryByMemId({
     mem_id: memId,
     type: 'hotspot_event',
-    title: `热点事件：${title}`,
+    title: `Hotspot event: ${title}`,
     content,
     detail,
     entities: ['SYSTEM'],
@@ -290,7 +290,7 @@ function contextPlatformBlocks() {
     const items = (cache?.platforms?.[platform] || []).filter(item => hotspotTitle(item)).slice(0, 10)
     if (!items.length) continue
     const source = items[0]?.source || 'hotspot-api'
-    blocks.push(`当前${platformLabel(platform)}热榜（来源：${source}）：\n${formatHotspotLines(items)}`)
+    blocks.push(`Current ${platformLabel(platform)} hot list (source: ${source}):\n${formatHotspotLines(items)}`)
   }
   return blocks.join('\n\n')
 }
@@ -308,7 +308,7 @@ export function buildHotspotRuntimeContext(message = '') {
       const result = persistMentionedHotspot(match, message)
       if (result?.mem_id) persisted.push(result.mem_id)
     } catch (err) {
-      console.warn('[Hotspot] 自动归档热点记忆失败:', err.message)
+      console.warn('[Hotspot] failed to auto-archive hotspot memory:', err.message)
     }
   }
 
@@ -316,21 +316,21 @@ export function buildHotspotRuntimeContext(message = '') {
   if (!shouldInjectPanelContext && !matches.length) return ''
 
   const matchText = matches.length
-    ? `\n\n用户本轮消息可能提到了这些近期热点：\n${formatHotspotLines(matches.map(m => m.item))}${persisted.length ? `\n已自动归档为长期热点记忆：${persisted.join('，')}` : ''}`
+    ? `\n\nThe current user message may have mentioned these recent hotspots:\n${formatHotspotLines(matches.map(m => m.item))}${persisted.length ? `\nAutomatically archived as long-term hotspot memories: ${persisted.join(', ')}` : ''}`
     : ''
 
-  return `## 热点上下文
-来源：热点模式界面，系统自动采集。发送者：SYSTEM。用途：提供当前环境背景，不代表用户请求。
+  return `## Hotspot Context
+Source: hotspot mode UI, automatically collected by the system. Sender: SYSTEM. Purpose: provide current environment background; this is not a user request.
 
-用户最近打开过热点面板。以下热点只作为上下文参考，不要求主动总结，不要把它当成用户消息，也不要因为它单独回复用户。
+The user recently opened the hotspot panel. The following hotspots are contextual references only. Do not proactively summarize them, do not treat them as user messages, and do not reply to the user solely because of this context.
 
-只有在满足任一条件时才可主动提及：
-- 热点与用户当前问题、任务或正在讨论的话题直接相关；
-- 热点包含明显需要用户注意的紧急风险、重大变化或高优先级信息；
-- 用户明确询问“热点”“热搜”“现在发生什么”等内容。
+Mention hotspots proactively only when one of these is true:
+- The hotspot is directly related to the user's current question, task, or topic.
+- The hotspot contains an urgent risk, major change, or high-priority information that clearly needs the user's attention.
+- The user explicitly asks about hotspots, trending searches, or what is happening now.
 
-抓取时间：${formatFetchedAt(cache.fetchedAt)}${cache.stale ? '，部分为缓存数据' : ''}
-当前热点面板：${getHotspotPanelState().active ? '开启' : '关闭'}；面板打开后会在最近 ${HOTSPOT_CONTEXT_TTL_MINUTES} 分钟内保留多平台热点印象。当前注入范围为每个平台 Top10；自动匹配和持久化候选为每个平台 Top20。
+Fetched at: ${formatFetchedAt(cache.fetchedAt)}${cache.stale ? ', partly cached data' : ''}
+Current hotspot panel: ${getHotspotPanelState().active ? 'open' : 'closed'}; after the panel opens, a multi-platform hotspot impression is retained for the most recent ${HOTSPOT_CONTEXT_TTL_MINUTES} minutes. Current injection scope is Top 10 per platform; automatic matching and persistence candidates use Top 20 per platform.
 
 ${contextPlatformBlocks()}${matchText}`
 }

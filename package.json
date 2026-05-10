@@ -1,7 +1,7 @@
 {
   "name": "bailongma",
   "productName": "Bailongma",
-  "version": "1.8.154",
+  "version": "1.8.166",
   "description": "A continuously running digital consciousness framework",
   "type": "module",
   "main": "electron/main.cjs",
@@ -14,9 +14,7 @@
     "start:backend": "node --env-file=.env src/index.js",
     "start:backend:lan": "powershell -ExecutionPolicy Bypass -File scripts/start-lan.ps1 backend",
     "dev": "node --env-file=.env --watch src/index.js",
-    "build:voice": "powershell -ExecutionPolicy Bypass -File scripts/build-voice.ps1",
-    "build": "powershell -ExecutionPolicy Bypass -File scripts/prebuild-clean.ps1 && npm run build:voice && electron-rebuild -f -w better-sqlite3 -v 33.4.11 && electron-builder --win",
-    "build:fast": "powershell -ExecutionPolicy Bypass -File scripts/prebuild-clean.ps1 && electron-builder --win",
+    "build": "powershell -ExecutionPolicy Bypass -File scripts/prebuild-clean.ps1 && electron-rebuild -f -w better-sqlite3 -v 33.4.11 && electron-builder --win",
     "publish": "electron-builder --win --publish always",
     "postinstall": "electron-builder install-app-deps",
     "smoke:tools": "node scripts/smoke-tools.mjs",
@@ -69,12 +67,6 @@
       "!**/node_modules/.cache",
       "!**/.vscode",
       "!data/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "voice-dist",
-        "to": "voice"
-      }
     ],
     "directories": {
       "buildResources": "build",

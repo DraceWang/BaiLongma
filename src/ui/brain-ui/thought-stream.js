@@ -45,7 +45,12 @@ const TOOL_ICON = {
 function isFailureResult(resultStr) {
   const t = (resultStr || "").trim();
   if (!t) return false;
-  return /^(错误|失败|异常)[：:]/.test(t) || /^Error\b/i.test(t) || /^ERROR\b/.test(t);
+  if (/^(错误|失败|异常)[：:]/.test(t) || /^Error\b/i.test(t) || /^ERROR\b/.test(t)) return true;
+  try {
+    const parsed = JSON.parse(t);
+    if (parsed && typeof parsed === "object" && parsed.ok === false) return true;
+  } catch {}
+  return false;
 }
 
 export class ThoughtStream {

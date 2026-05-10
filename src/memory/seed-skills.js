@@ -19,9 +19,9 @@ function shortHash(s) {
 // 已知组件的 use_case 模板：seed 时附带；ui_register 转正的组件由它自己写 use_case。
 const BUILTIN_COMPONENT_USAGE = {
   WeatherCard: {
-    use_case: '用户问天气、温度、出门、是否下雨、明天后天的天气。',
+    use_case: 'Use when the user asks about weather, temperature, going out, rain, or weather for tomorrow/the day after tomorrow.',
     example_call: 'ui_show({ component: "WeatherCard", props: { city, temp, condition, feel?, high?, low?, wind?, forecast? }, hint: { placement: "notification", size: "md" } })',
-    note: 'city 必须先确定（问用户或从上下文推断）；温度数值不要瞎填，先调 fetch_url 查 wttr.in。形态默认 notification+md；用户说"详细看看"或"研究一下"时改 floating+lg。',
+    note: 'Determine city first by asking the user or inferring from context. Do not invent temperature values; call fetch_url for wttr.in first. Default shape is notification+md; switch to floating+lg when the user asks for a detailed look or deeper study.',
   },
 }
 
@@ -35,9 +35,9 @@ function seedAgentGuide() {
 
   // content：摘要（命中关键词的入口）；detail：整份指南
   const summary = [
-    '[技能·UI] 写组件指南',
-    '什么时候用 UI 卡片 / 三种执行模式 A>B>C / 内联模板与内联组件的写法 / 转正流程 / 避雷清单。',
-    '关键词：做组件、画一个、显示一下、做卡片、自己写、inline、没有这个组件、ui_show_inline、ui_register。',
+    '[Skill UI] Component authoring guide',
+    'When to use UI cards / three execution modes A>B>C / inline-template and inline-script patterns / promotion flow / pitfalls.',
+    'Keywords: build a component, draw one, show it, make a card, custom, inline, missing component, ui_show_inline, ui_register.',
   ].join('\n')
 
   insertMemory({
@@ -45,7 +45,7 @@ function seedAgentGuide() {
     type: 'skill',
     content: summary,
     detail: content,
-    title: 'ACUI 组件创作指南',
+    title: 'ACUI component authoring guide',
     tags: ['skill.ui', 'agent-guide', `hash:${h}`],
     entities: [],
     timestamp: new Date().toISOString(),
@@ -65,11 +65,11 @@ function seedComponentSkills() {
     const kebab = name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
     const fields = Object.keys(def.propsSchema || {}).join(', ')
     const content = [
-      `[技能·UI] ${name}`,
-      `适用场景：${usage.use_case}`,
-      `调用：${usage.example_call}`,
-      fields ? `字段：${fields}` : null,
-      usage.note ? `注意：${usage.note}` : null,
+      `[Skill UI] ${name}`,
+      `Use case: ${usage.use_case}`,
+      `Call: ${usage.example_call}`,
+      fields ? `Fields: ${fields}` : null,
+      usage.note ? `Note: ${usage.note}` : null,
     ].filter(Boolean).join('\n')
 
     insertMemory({
@@ -77,7 +77,7 @@ function seedComponentSkills() {
       type: 'skill',
       content,
       detail: content,
-      title: `UI 组件：${name}`,
+      title: `UI component: ${name}`,
       tags: ['skill.ui', `component:${name}`],
       entities: [],
       timestamp: new Date().toISOString(),

@@ -40,9 +40,7 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
   if (config.provider === 'deepseek') {
     const thinkingEnabled = shouldEnableDeepSeekThinking(thinking)
     requestParams.reasoning_effort = 'high'
-    requestParams.extra_body = {
-      thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' }
-    }
+    requestParams.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }
   } else {
     if (!thinking) requestParams.thinking = { type: 'disabled' }
   }
@@ -486,6 +484,50 @@ function buildMissingToolNudge(userMessage = '') {
   return `The user's request requires a real tool call, not a textual claim. Do not say it is done unless the tool result proves it.\nUser request:\n${String(userMessage || '').slice(0, 600)}\n\nCall the appropriate tool now. For sandbox file creation or editing, call write_file with the exact path and content, then call send_message after the write_file result returns.`
 }
 
+// 检测模型是否在文字中"描述"了工具调用而没有真正调用
+// 返回检测到的规范工具名，或 null
+function detectFakeToolCall(content, toolNames) {
+  if (!content || !toolNames.length) return null
+
+  // 去掉下划线后做模糊匹配（处理模型写成 settickinterval 而非 set_tick_interval 的情况）
+  const normalizedContent = content.toLowerCase().replace(/[_\s]/g, '')
+  for (const name of toolNames) {
+    if (name.length < 5) continue  // 太短的名字容易误判
+    if (normalizedContent.includes(name.toLowerCase().replace(/_/g, ''))) {
+      return name
+    }
+  }
+
+  // 检测中文动作括号伪调用，如 [心跳启动中] [调用成功] [执行中]
+  if (/[\[【][^\]】]{2,20}(中|完成|成功|ing)[\]】]/.test(content)) {
+    return '(action claim)'
+  }
+
+  return null
+}
+
+function buildFakeToolCallNudge(toolName, toolSchemas = []) {
+  const isGeneric = toolName === '(action claim)'
+  const header = isGeneric
+    ? 'You wrote a bracketed action description (e.g. [xxx中]) but did not call any tool.'
+    : `Your reply mentioned the tool "${toolName}" in text but did not invoke it through the function-call mechanism.`
+
+  let schemaHint = ''
+  if (!isGeneric) {
+    const schema = toolSchemas.find(s => s?.function?.name === toolName)
+    if (schema) {
+      const props = schema.function?.parameters?.properties || {}
+      const required = schema.function?.parameters?.required || []
+      const paramList = Object.entries(props)
+        .map(([k, v]) => `${required.includes(k) ? k + '*' : k} (${v.type || 'any'})`)
+        .join(', ')
+      if (paramList) schemaHint = `\nRequired call format: ${toolName}({ ${paramList} })  (* = required)`
+    }
+  }
+
+  return `${header} Writing text about what a tool does has no effect on the system — the action did not happen.\n\nYou must now invoke the tool using the function-call interface, not describe it in prose.${schemaHint}`
+}
+
 function throwIfAborted(signal) {
   if (!signal?.aborted) return
   const err = new Error(signal.reason || 'Aborted')
@@ -516,6 +558,7 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
   let sentMessage = false
   let finalNudgeUsed = false
   let missingToolNudgeUsed = false
+  let fakeToolNudgeUsed = false
   const toolLoopState = createToolLoopState()
 
   for (let round = 0; round < TOOL_LOOP_LIMITS.maxRounds; round++) {
@@ -563,10 +606,22 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
         missingToolNudgeUsed = true
         continue
       }
+      // 检测伪工具调用：模型在文字里描述了调用但没有真正发起 function-call
+      if (!fakeToolNudgeUsed && content) {
+        const fakeToolName = detectFakeToolCall(content, tools)
+        if (fakeToolName) {
+          console.log(`[伪调用检测] 模型文字中发现 "${fakeToolName}"，注入修正 nudge`)
+          messages.push({ role: 'assistant', content })
+          messages.push({ role: 'user', content: buildFakeToolCallNudge(fakeToolName, toolSchemas) })
+          allContent = ''
+          fakeToolNudgeUsed = true
+          continue
+        }
+      }
       if (mustReply && sawToolCall && !sentMessage && !allContent.trim() && !finalNudgeUsed) {
         messages.push({
           role: 'user',
-          content: '工具结果已经返回，但你还没有给用户最终回复。请现在基于已有工具结果调用 send_message 回复用户；如果信息不足，也要说明查到的结果、失败来源和限制，不要直接结束。',
+          content: 'Tool results have returned, but you have not sent the user a final reply yet. Based on the available tool results, call send_message now to reply to the user. If information is insufficient, explain what was found, the failure source, and the limitations; do not end silently.',
         })
         finalNudgeUsed = true
         continue
@@ -684,16 +739,16 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
       // XML 工具调用：assistant 消息为纯文本，工具结果作为 user 消息注入
       if (content) messages.push({ role: 'assistant', content })
       const resultSummary = toolResults.map(tr =>
-        `[工具结果] ${tr.name}: ${tr.result.slice(0, 300)}`
+        `[Tool result] ${tr.name}: ${tr.result.slice(0, 300)}`
       ).join('\n')
       const hasSendMessage = toolResults.some(tr => tr.name === 'send_message')
       messages.push({
         role: 'user',
         content: hasSendMessage
-          ? `工具执行结果：\n${resultSummary}\n\n消息已经发送。请不要重复发送；如无后续必要，直接结束本轮。`
+          ? `Tool execution results:\n${resultSummary}\n\nMessage sent. If you still need to send additional separate messages, call send_message again now. Otherwise end this round.`
           : toolLoopStopReason
             ? buildToolLoopStopNudge(toolLoopStopReason, lastToolResult)
-            : `工具执行结果：\n${resultSummary}\n\n请继续完成任务。如果这是用户消息，请在信息足够时调用 send_message 给用户最终答复；如果工具失败，也要说明失败和可用线索，不要空结束。`,
+            : `Tool execution results:\n${resultSummary}\n\nContinue completing the task. If this is a user message and the information is sufficient, call send_message to give the user a final reply. If a tool failed, explain the failure and available clues; do not end silently.`,
       })
     } else {
       const assistantMsg = {
@@ -722,10 +777,15 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
           role: 'user',
           content: buildToolLoopStopNudge(toolLoopStopReason, lastToolResult),
         })
+      } else if (hasSendMessage) {
+        messages.push({
+          role: 'user',
+          content: 'Message sent. If you still need to send additional separate messages to the user, call send_message again now. Otherwise end this round.',
+        })
       } else if (mustReply && !hasSendMessage) {
         messages.push({
           role: 'user',
-          content: '工具结果已经返回。请基于已有工具结果继续完成用户请求；如果信息已经足够，必须调用 send_message 给用户最终回复。涉及文件、目录、命令或网络请求时，只能陈述工具结果里能够验证的事实，例如 ok/verified/path/bytes/exit_code/status；不要声称完成任何没有工具证据支持的动作。如果工具失败或资料不足，也要说明限制和下一步建议，不要直接结束。',
+          content: 'Tool results have returned. Continue completing the user request based on the available results. If the information is sufficient, you must call send_message to send the final reply to the user. For files, directories, commands, or network requests, state only facts verified by tool results, such as ok/verified/path/bytes/exit_code/status. Do not claim completion of any action without tool evidence. If a tool failed or the data is insufficient, explain the limitation and next suggested step; do not end silently.',
         })
       }
     }

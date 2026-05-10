@@ -19,7 +19,20 @@ export function nowTimestamp() {
 }
 
 export function formatTick() {
-  return `TICK ${nowTimestamp()}`
+  const now = new Date()
+  const ts = nowTimestamp()
+  const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const weekday = weekdays[now.getDay()]
+  const hour = now.getHours()
+  let period
+  if (hour >= 5 && hour < 9)       period = 'early morning'
+  else if (hour >= 9 && hour < 12)  period = 'morning'
+  else if (hour >= 12 && hour < 14) period = 'noon'
+  else if (hour >= 14 && hour < 18) period = 'afternoon'
+  else if (hour >= 18 && hour < 21) period = 'evening'
+  else if (hour >= 21 && hour < 24) period = 'late night'
+  else                               period = 'midnight'
+  return `TICK ${ts} | ${weekday} ${period}`
 }
 
 // 将毫秒时长转换为自然语言描述

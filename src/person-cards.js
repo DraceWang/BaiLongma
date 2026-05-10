@@ -330,12 +330,12 @@ export function getPersonCard(query = '') {
 
 export function buildPersonCardPanelStateContext() {
   const state = getPersonCardPanelState()
-  const status = state.active ? '开启' : '关闭'
-  const ttl = state.contextActive ? `人物卡片上下文 TTL 剩余约 ${Math.ceil(state.contextTtlSeconds / 60)} 分钟` : '当前没有有效人物卡片上下文 TTL'
-  const current = state.card?.name ? `当前人物：${state.card.name}。` : '当前没有选中人物。'
-  return `## 人物卡片状态
-当前人物卡片面板：${status}。${current}${ttl}。
-如用户明确表示“不认识某人”“某人是谁”，或演示需要，可使用 person_card_mode 工具打开、更新或关闭人物卡片；普通回答不要为了炫技主动打开。`
+  const status = state.active ? 'open' : 'closed'
+  const ttl = state.contextActive ? `Person-card context TTL has about ${Math.ceil(state.contextTtlSeconds / 60)} minutes remaining` : 'No active person-card context TTL'
+  const current = state.card?.name ? `Current person: ${state.card.name}.` : 'No person is selected.'
+  return `## Person Card State
+Current person-card panel: ${status}. ${current}${ttl}.
+Use the person_card_mode tool to open, update, or close a person card only when the user explicitly says they do not know someone, asks who someone is, or a demo requires it. Do not open it proactively just to show off.`
 }
 
 function persistMentionedPerson(card, message = '') {
@@ -343,20 +343,20 @@ function persistMentionedPerson(card, message = '') {
   const timestamp = nowTimestamp()
   const memId = `known_person_${personCardId(card.name).replace(/^person_card_/, '')}`
   const detail = [
-    `身份：${card.title || '未知'}`,
-    `简介：${card.summary || ''}`,
-    card.knownFor?.length ? `代表作/代表事件：${card.knownFor.join('、')}` : '',
-    card.tags?.length ? `标签：${card.tags.join('、')}` : '',
-    `来源：${card.source || 'person_card'}`,
-    `触发消息摘录：${String(message || '').slice(0, 120)}`,
-    '这是程序自动归档的人物识别事实。后续如有更准确资料，可用 upsert_memory 更新同一个 mem_id。',
+    `Identity: ${card.title || 'unknown'}`,
+    `Summary: ${card.summary || ''}`,
+    card.knownFor?.length ? `Known for: ${card.knownFor.join(', ')}` : '',
+    card.tags?.length ? `Tags: ${card.tags.join(', ')}` : '',
+    `Source: ${card.source || 'person_card'}`,
+    `Trigger message excerpt: ${String(message || '').slice(0, 120)}`,
+    'This is an automatically archived person-identification fact. If more accurate information appears later, update the same mem_id with upsert_memory.',
   ].filter(Boolean).join('\n')
 
   return upsertMemoryByMemId({
     mem_id: memId,
     type: 'person_card',
-    title: `人物卡片：${card.name}`,
-    content: `用户询问或提到了人物：${card.name}`,
+    title: `Person card: ${card.name}`,
+    content: `The user asked about or mentioned this person: ${card.name}`,
     detail,
     entities: ['SYSTEM'],
     concepts: [card.name, ...(card.aliases || []), ...(card.tags || [])].filter(Boolean).slice(0, 16),
@@ -379,19 +379,19 @@ export function buildPersonCardRuntimeContext(message = '') {
       const result = persistMentionedPerson(matchedCard, message)
       persistedId = result?.mem_id || ''
     } catch (err) {
-      console.warn('[PersonCard] 自动归档人物记忆失败:', err.message)
+      console.warn('[PersonCard] failed to auto-archive person memory:', err.message)
     }
   }
 
-  return `## 人物卡片上下文
-来源：人物卡片模式，系统自动采集/用户触发。发送者：SYSTEM。用途：帮助解释用户可能不认识的公众人物，不代表用户单独提出了新任务。
+  return `## Person Card Context
+Source: person-card mode, automatically collected by the system or triggered by the user. Sender: SYSTEM. Purpose: help explain public figures the user may not know; this does not mean the user created a separate new task.
 
-当前人物：${card.name}
-身份：${card.title || '未知'}
-简介：${card.summary || '暂无'}
-代表作/代表事件：${card.knownFor?.length ? card.knownFor.join('、') : '暂无'}
-标签：${card.tags?.length ? card.tags.join('、') : '暂无'}
-来源：${card.source || 'person_card'}${persistedId ? `\n已自动归档为长期人物记忆：${persistedId}` : ''}
+Current person: ${card.name}
+Identity: ${card.title || 'unknown'}
+Summary: ${card.summary || 'none'}
+Known for: ${card.knownFor?.length ? card.knownFor.join(', ') : 'none'}
+Tags: ${card.tags?.length ? card.tags.join(', ') : 'none'}
+Source: ${card.source || 'person_card'}${persistedId ? `\nAutomatically archived as long-term person memory: ${persistedId}` : ''}
 
-使用规则：只有在用户明确询问“谁是某人”“不认识某人”，或该人物与当前话题直接相关时才主动解释；解释要简洁，避免编造不确定的生平细节。`
+Usage rule: explain proactively only when the user explicitly asks who someone is, says they do not know someone, or the person is directly related to the current topic. Keep the explanation concise and avoid inventing uncertain biographical details.`
 }

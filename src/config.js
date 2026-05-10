@@ -191,9 +191,7 @@ function buildPingParams(provider, model) {
   }
   if (provider === DEEPSEEK_PROVIDER) {
     pingParams.reasoning_effort = 'high'
-    pingParams.extra_body = {
-      thinking: { type: isThinkingEnabledForModel(model) ? 'enabled' : 'disabled' }
-    }
+    pingParams.thinking = { type: isThinkingEnabledForModel(model) ? 'enabled' : 'disabled' }
   }
   return pingParams
 }
@@ -599,13 +597,13 @@ export function setSocialConfig(updates) {
   writeStoredConfig({ ...existing, social: next })
 }
 
-const VOICE_CONFIG_KEYS = ['whisperModel', 'aliyunApiKey', 'tencentSecretId', 'tencentSecretKey', 'tencentAppId', 'xunfeiAppId', 'xunfeiApiKey', 'xunfeiApiSecret']
+const VOICE_CONFIG_KEYS = ['aliyunApiKey', 'tencentSecretId', 'tencentSecretKey', 'tencentAppId', 'xunfeiAppId', 'xunfeiApiKey', 'xunfeiApiSecret']
 
 export function getVoiceConfig() {
   let stored = {}
   try { stored = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))?.voice || {} } catch {}
-  const result = { whisperModel: stored.whisperModel || 'small' }
-  for (const key of VOICE_CONFIG_KEYS.slice(1)) {
+  const result = {}
+  for (const key of VOICE_CONFIG_KEYS) {
     result[key] = { configured: !!(stored[key]) }
   }
   return result
@@ -628,6 +626,7 @@ export function setVoiceConfig(updates) {
 // TTS 配置
 const TTS_CONFIG_KEYS = [
   'ttsProvider', 'ttsVoiceId',
+  'minimaxKey',
   'doubaoKey', 'doubaoAppId', 'doubaoAccessKey', 'doubaoResourceId',
   'openaiTtsKey', 'openaiTtsBaseURL',
   'elevenLabsKey',
@@ -640,6 +639,7 @@ export function getTTSConfig() {
   return {
     ttsProvider:     stored.ttsProvider  || 'minimax',
     ttsVoiceId:      stored.ttsVoiceId   || '',
+    minimaxKey:      { configured: !!(stored.minimaxKey || process.env.MINIMAX_API_KEY || getMinimaxKey()) },
     doubaoKey:       { configured: !!(stored.doubaoKey) },
     doubaoAppId:     { configured: !!(stored.doubaoAppId), value: stored.doubaoAppId || '' },
     doubaoAccessKey: { configured: !!(stored.doubaoAccessKey) },
@@ -663,7 +663,7 @@ export function getTTSCredentials() {
     doubaoAppId:    stored.doubaoAppId  || process.env.DOUBAO_TTS_APP_ID || '',
     doubaoAccessKey: stored.doubaoAccessKey || process.env.DOUBAO_TTS_ACCESS_KEY || '',
     doubaoResourceId: stored.doubaoResourceId || process.env.DOUBAO_TTS_RESOURCE_ID || '',
-    minimaxKey:     process.env.MINIMAX_API_KEY || getMinimaxKey() || (config.provider === 'minimax' ? config.apiKey : '') || '',
+    minimaxKey:     process.env.MINIMAX_API_KEY || stored.minimaxKey || getMinimaxKey() || (config.provider === 'minimax' ? config.apiKey : '') || '',
     openaiKey:      stored.openaiTtsKey  || '',
     openaiBaseURL:  stored.openaiTtsBaseURL || '',
     elevenLabsKey:  stored.elevenLabsKey || '',

@@ -13,6 +13,9 @@ import {
 } from '../db.js'
 import { getActiveUICards } from '../events.js'
 
+const L2_CONTEXT_HOURS = 24 * 7
+const PRIMARY_USER_ID = 'ID:000001'
+
 function summarizeUISignals(signals = []) {
   if (!signals.length) return ''
   const now = Date.now()
@@ -20,16 +23,16 @@ function summarizeUISignals(signals = []) {
     const age = Math.max(0, Math.round((now - s.ts) / 1000))
     let payload = {}
     try { payload = JSON.parse(s.payload || '{}') } catch {}
-    const target = s.target ? `（${s.target}）` : ''
+    const target = s.target ? ` (${s.target})` : ''
     let desc = s.type
-    if (s.type === 'card.mounted')        desc = `卡片显示完成${target}`
-    else if (s.type === 'card.dismissed') desc = `用户关闭了卡片${target}（${payload.by || '未知'}，停留 ${Math.round((payload.dwell_ms||0)/1000)}s）`
-    else if (s.type === 'card.dwell')     desc = `卡片停留 ${Math.round((payload.dwell_ms||0)/1000)}s${target}`
-    else if (s.type === 'card.action')    desc = `用户在卡片上操作 ${payload.action || ''}${target}`
-    else if (s.type === 'card.error')     desc = `卡片错误：${payload.message || ''}${target}`
-    return `- ${age}s 前：${desc}`
+    if (s.type === 'card.mounted')        desc = `Card finished mounting${target}`
+    else if (s.type === 'card.dismissed') desc = `User dismissed the card${target} (${payload.by || 'unknown'}, dwell ${Math.round((payload.dwell_ms||0)/1000)}s)`
+    else if (s.type === 'card.dwell')     desc = `Card dwell ${Math.round((payload.dwell_ms||0)/1000)}s${target}`
+    else if (s.type === 'card.action')    desc = `User acted on card: ${payload.action || ''}${target}`
+    else if (s.type === 'card.error')     desc = `Card error: ${payload.message || ''}${target}`
+    return `- ${age}s ago: ${desc}`
   })
-  return `过去一分钟界面行为（这只是上下文，不要因此主动开口）：\n${lines.join('\n')}`
+  return `UI behavior from the past minute. This is context only; do not speak proactively just because of it:\n${lines.join('\n')}`
 }
 
 // 消息格式解析
@@ -140,7 +143,9 @@ export async function runInjector({ message, state, hint = '' }) {
     conversationWindow = getRecentConversation(senderId, 20, 24)
     senderMemories = getMemoriesByEntity(senderId, 10)
   } else if (message && /^TICK\s/i.test(message.trim())) {
-    conversationWindow = getRecentConversationTimeline(20, 24)
+    personMemory = getPersonMemory(PRIMARY_USER_ID)
+    conversationWindow = getRecentConversationTimeline(40, L2_CONTEXT_HOURS)
+    senderMemories = getMemoriesByEntity(PRIMARY_USER_ID, 10)
   }
 
   const hintText = hint ? hint.replace(/<think>[\s\S]*?<\/think>/gi, '').slice(0, 400) : ''
@@ -190,9 +195,9 @@ export async function runInjector({ message, state, hint = '' }) {
 
     if (hits.length > 0) {
       recallMemories.push(...hits)
-      directions.push(`上一刻主动请求了回忆“${query}”，相关细节已注入。`)
+      directions.push(`You proactively requested memory recall for "${query}" in the previous moment. Relevant details have been injected.`)
     } else {
-      directions.push(`主动请求了回忆“${query}”，但记忆库中未找到相关内容。`)
+      directions.push(`You proactively requested memory recall for "${query}", but no related memory was found.`)
     }
   }
 
@@ -214,7 +219,9 @@ export async function runInjector({ message, state, hint = '' }) {
   if (mmCaps.includes('lyrics')) baseTools.push('generate_lyrics')
   if (mmCaps.includes('music'))  baseTools.push('generate_music')
   if (mmCaps.includes('image'))  baseTools.push('generate_image')
-  if (senderId || state?.prev_recall) baseTools.push('search_memory')
+  const isTick = !senderId && /^TICK\s/i.test(message?.trim())
+  if (senderId || state?.prev_recall || isTick) baseTools.push('search_memory')
+  if (isTick && state?.startupSelfCheck?.active) baseTools.push('complete_startup_self_check')
   const tools = [...new Set(baseTools)]
 
   const actionLog = getRecentActionLogs(10)
@@ -269,16 +276,16 @@ export function formatMemoriesForPrompt(memories, recallMemories = []) {
       const typeLabel = memory.event_type ? `[${memory.event_type}] ` : ''
       const titlePart = memory.title ? `《${memory.title}》 ` : ''
       const bodyPath = extractBodyPath(memory)
-      const bodyHint = bodyPath ? `\n  ↳ 正文：read_file("${bodyPath}")` : ''
+      const bodyHint = bodyPath ? `\n  ↳ Full text: read_file("${bodyPath}")` : ''
       return `- [${memory.timestamp.slice(0, 10)}] ${typeLabel}${titlePart}${memory.content}${bodyHint}`
     }).join('\n'))
   }
 
   if (recallMemories?.length > 0) {
-    parts.push('[回忆细节]\n' + recallMemories.map(memory => {
+    parts.push('[Recall details]\n' + recallMemories.map(memory => {
       const titlePart = memory.title ? `《${memory.title}》 ` : ''
       const bodyPath = extractBodyPath(memory)
-      const bodyHint = bodyPath ? `\n  ↳ 正文：read_file("${bodyPath}")` : ''
+      const bodyHint = bodyPath ? `\n  ↳ Full text: read_file("${bodyPath}")` : ''
       return `- [${memory.timestamp.slice(0, 10)}] ${titlePart}${memory.content}\n  ${memory.detail}${bodyHint}`
     }).join('\n'))
   }
@@ -291,16 +298,16 @@ export function formatPrefetchedItems(prefetchedItems = []) {
   if (!prefetchedItems?.length) return ''
   const body = prefetchedItems.map(item => {
     const fetchedTime = item.fetched_at?.slice(11, 16) || ''
-    return `【${item.source}】（${fetchedTime} 已查好）\n${item.content}`
+    return `[${item.source}] (${fetchedTime} already fetched)\n${item.content}`
   }).join('\n\n')
-  return body + '\n\n以上数据已预查好，数据别出错，语言自己组织，不要每次都一个句式。'
+  return body + '\n\nThe data above has already been prefetched. Use it directly and phrase the response naturally; do not reuse the same sentence pattern every time.'
 }
 
 // 当前屏幕上的存活 ACUI 卡片列表
 export function formatActiveUICards(cards = []) {
   if (!cards?.length) return ''
-  const lines = cards.map(c => `  - id="${c.id}"  组件=${c.component}`)
-  return `【当前屏幕存活卡片】\n${lines.join('\n')}\n如需关闭请用 ui_hide 并传入对应 id；如需更新内容请用 ui_update。`
+  const lines = cards.map(c => `  - id="${c.id}"  component=${c.component}`)
+  return `[Active UI cards on screen]\n${lines.join('\n')}\nUse ui_hide with the id to close a card; use ui_update to update its content.`
 }
 
 // 任务知识库：显示完整 content + detail

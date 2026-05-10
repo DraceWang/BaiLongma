@@ -4,22 +4,22 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'express',
-      description: '向指定 ID 的个体表达内容。这是行为层与外界通讯的唯一出口。可选择表达形式：text（文字）或 voice（语音）。',
+      description: 'Express content to an individual by ID. This is the behavior-layer communication outlet. Supports text or voice format.',
       parameters: {
         type: 'object',
         properties: {
           target_id: {
             type: 'string',
-            description: '接收方的 ID，格式如 ID:000001'
+            description: 'Recipient ID, such as ID:000001.'
           },
           content: {
             type: 'string',
-            description: '要表达的内容'
+            description: 'Content to express.'
           },
           format: {
             type: 'string',
             enum: ['text', 'voice'],
-            description: '表达形式，默认 text'
+            description: 'Expression format, default text.'
           }
         },
         required: ['target_id', 'content']
@@ -31,17 +31,17 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'send_message',
-      description: '向指定 ID 的个体发送消息。所有对外通讯必须通过此工具，不可直接输出回复内容。',
+      description: 'Send a message to an individual by ID. All outbound communication must use this tool; do not output reply content directly.',
       parameters: {
         type: 'object',
         properties: {
           target_id: {
             type: 'string',
-            description: '接收方的 ID，格式如 ID:000001'
+            description: 'Recipient ID, such as ID:000001.'
           },
           content: {
             type: 'string',
-            description: '消息内容'
+            description: 'Message content.'
           }
         },
         required: ['target_id', 'content']
@@ -53,13 +53,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'read_file',
-      description: '读取指定路径的文件内容。',
+      description: 'Read the contents of a file at the specified path.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: '文件的绝对路径或相对路径'
+            description: 'Absolute or relative file path.'
           }
         },
         required: ['path']
@@ -71,13 +71,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'list_dir',
-      description: '列出指定目录下的文件和文件夹。',
+      description: 'List files and folders under the specified directory.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: '目录路径，默认为当前目录'
+            description: 'Directory path, defaults to the current directory.'
           }
         },
         required: []
@@ -89,17 +89,17 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'write_file',
-      description: '将内容写入指定文件。文件不存在时自动创建。',
+      description: 'Write content to the specified file. Creates the file automatically if it does not exist.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: '文件路径'
+            description: 'File path.'
           },
           content: {
             type: 'string',
-            description: '要写入的内容'
+            description: 'Content to write.'
           }
         },
         required: ['path', 'content']
@@ -177,11 +177,11 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'delete_file',
-      description: '删除 sandbox 内的文件或目录。目录会递归删除。系统文件（readme.txt、world.txt）不可删除。',
+      description: 'Delete a file or directory inside the sandbox. Directories are removed recursively. System files such as readme.txt and world.txt cannot be deleted.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: '要删除的文件或目录路径（sandbox 内相对路径）' }
+          path: { type: 'string', description: 'File or directory path to delete, relative to the sandbox.' }
         },
         required: ['path']
       }
@@ -192,11 +192,11 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'make_dir',
-      description: '在 sandbox 内创建目录，支持多级目录（如 projects/myapp/src）。',
+      description: 'Create a directory inside the sandbox. Nested paths such as projects/myapp/src are supported.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: '要创建的目录路径' }
+          path: { type: 'string', description: 'Directory path to create.' }
         },
         required: ['path']
       }
@@ -211,9 +211,9 @@ export const TOOL_SCHEMAS = {
       parameters: {
         type: 'object',
         properties: {
-          command: { type: 'string', description: '要执行的命令，如 "node server.js"、"npm install"、"python main.py"' },
-          background: { type: 'boolean', description: '是否后台运行，默认 false。启动服务器时设为 true。' },
-          timeout: { type: 'number', description: '前台执行的超时秒数，默认 30，最大 120。' }
+          command: { type: 'string', description: 'Command to run, such as "node server.js", "npm install", or "python main.py".' },
+          background: { type: 'boolean', description: 'Run in the background, default false. Set true when starting a server.' },
+          timeout: { type: 'number', description: 'Foreground execution timeout in seconds, default 30, max 120.' }
         },
         required: ['command']
       }
@@ -228,7 +228,7 @@ export const TOOL_SCHEMAS = {
       parameters: {
         type: 'object',
         properties: {
-          pid: { type: 'number', description: '要停止的进程 PID' }
+          pid: { type: 'number', description: 'PID of the process to stop.' }
         },
         required: ['pid']
       }
@@ -248,13 +248,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'speak',
-      description: '将文字转化为语音，保存为音频文件。仅用于创作性内容（诗句、散文、旁白、歌词朗读等），不要用于普通的对话回复——对话语音回复由系统自动处理，无需调用此工具。文字长度请控制在 500 字以内。',
+      description: 'Convert text to speech and save it as an audio file. Use only for creative content such as poems, prose, narration, or lyric reading. Do not use for normal chat replies; voice replies are handled automatically by the system. Keep text under 500 Chinese characters.',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: '要转化为语音的文字内容' },
-          voice_id: { type: 'string', description: '声音 ID，可选。可用值：male-qn-qingse（青涩男声）、male-qn-jingying（精英男声）、male-qn-badao（霸道男声）、female-shaonv（少女）、female-yujie（御姐）、female-chengshu（成熟女声）、presenter_male（男主播）、presenter_female（女主播）。默认 male-qn-qingse。' },
-          filename: { type: 'string', description: '保存的文件名（不含扩展名），可选' },
+          text: { type: 'string', description: 'Text to convert to speech.' },
+          voice_id: { type: 'string', description: 'Optional voice ID. Available values: male-qn-qingse, male-qn-jingying, male-qn-badao, female-shaonv, female-yujie, female-chengshu, presenter_male, presenter_female. Default: male-qn-qingse.' },
+          filename: { type: 'string', description: 'Optional output filename without extension.' },
         },
         required: ['text']
       }
@@ -265,12 +265,12 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'generate_lyrics',
-      description: '根据创作方向生成一首完整的歌词，包含标题、风格标签和歌词结构。生成后自动保存到 sandbox/lyrics/ 目录。可以将生成的歌词用于 generate_music。',
+      description: 'Generate complete song lyrics from a creative direction, including title, style tags, and lyric structure. The result is saved automatically under sandbox/lyrics/ and can be passed to generate_music.',
       parameters: {
         type: 'object',
         properties: {
-          prompt: { type: 'string', description: '歌词的创作方向、主题或情感描述' },
-          mode: { type: 'string', description: '模式：write_full_song（默认，生成完整歌词）' },
+          prompt: { type: 'string', description: 'Creative direction, theme, or emotional description for the lyrics.' },
+          mode: { type: 'string', description: 'Mode: write_full_song by default, generating complete lyrics.' },
         },
         required: ['prompt']
       }
@@ -281,13 +281,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'set_tick_interval',
-      description: '调节自己的思维节奏——设置下一段时间内 TICK 的间隔。紧急或在处理重要事务时可设短（如 3 秒），空闲或沉思时可设长（如 600 秒）。seconds 范围 [2, 3600]，ttl 范围 [1, 50]（持续多少轮自动回归默认）。越界会被自动 clamp。',
+      description: 'Adjust your own thinking rhythm by setting the TICK interval for the next span of time. Use shorter intervals during urgent or important work and longer intervals when idle or reflecting. seconds range [2, 3600], ttl range [1, 50]; out-of-range values are clamped.',
       parameters: {
         type: 'object',
         properties: {
-          seconds: { type: 'number', description: 'TICK 间隔秒数，[2, 3600]' },
-          ttl: { type: 'number', description: '持续轮数，[1, 50]。到期自动回归默认节奏。不传默认 10。' },
-          reason: { type: 'string', description: '简短理由，供自己之后回看。可选。' },
+          seconds: { type: 'number', description: 'TICK interval in seconds, range [2, 3600].' },
+          ttl: { type: 'number', description: 'Number of turns to keep this rhythm, range [1, 50]. Defaults to 10 and then returns to the default rhythm.' },
+          reason: { type: 'string', description: 'Optional short reason for later self-reference.' },
         },
         required: ['seconds']
       }
@@ -298,36 +298,36 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'media_mode',
-      description: `控制 brain-ui 的媒体舞台。video 从右侧打开，image 从左侧打开，music 从右侧弹出唱片机卡片。
-视频 URL 规则（重要，违反会导致黑屏）：
-  - YouTube：必须使用完整 watch URL（https://www.youtube.com/watch?v=xxx）或 youtu.be 短链。只传 videoId 字符串无效。必须是公开可嵌入的视频（非私有、非区域限制、非需登录）。
-  - Bilibili：必须包含 BV 号（https://www.bilibili.com/video/BVxxxxx）。
-  - 直链视频：必须是可直接访问的 .mp4/.webm 等格式 URL，需确认链接有效且允许跨域。
-  - 严禁：不要传推测出来的 URL；不要传无法访问的私有视频；不要传平台分享页但非嵌入页的链接。
-  - 建议：在 search 工具里先找到并确认视频存在后，再调用 media_mode。优先选择官方频道、播放量高的公开视频。
-按 V 键只是暂停并收起面板（内容保留），close/hide action 才真正销毁视频。
-音乐模式规则：
-  - src 传本地文件绝对路径（用 file:// 前缀）或 HTTP 直链音频。播放前先用 list_directory 或 search_files 确认文件存在。
-  - lrc 是可选的 LRC 格式歌词文本（[mm:ss.xx]歌词行），有就传，没有留空即可。
-  - 播放音乐时不需要回复消息，直接调用工具执行即可。
-  - 按 M 键收起/展开面板。`,
+      description: `Control the brain-ui media stage. video opens from the right, image opens from the left, and music opens a record-player card from the right.
+Video URL rules, important because violations can cause a blank player:
+  - YouTube: use a full watch URL such as https://www.youtube.com/watch?v=xxx or a youtu.be short link. A bare videoId string is invalid. The video must be public and embeddable, not private, region-locked, or login-gated.
+  - Bilibili: the URL must include a BV id, such as https://www.bilibili.com/video/BVxxxxx.
+  - Direct video links: must be directly accessible .mp4/.webm or similar URLs; confirm the link works and allows cross-origin access.
+  - Never pass guessed URLs, inaccessible private videos, or platform share pages that are not embeddable playback links.
+  - Recommended: use search first to find and confirm the video, then call media_mode. Prefer official channels and high-view public videos.
+Pressing V only pauses and collapses the panel while preserving content; close/hide actions actually destroy the video.
+Music mode rules:
+  - src should be a local absolute file path with file:// prefix, or a direct HTTP audio URL. Confirm the file exists before playing.
+  - lrc is optional LRC-format lyric text, such as [mm:ss.xx]lyric line.
+  - When playing music, no chat reply is needed; call the tool directly.
+  - Press M to collapse or expand the panel.`,
       parameters: {
         type: 'object',
         properties: {
-          mode: { type: 'string', enum: ['video', 'camera', 'image', 'music'], description: 'video=右侧视频模式；camera=右侧摄像头视频；image=左侧图片模式；music=右侧唱片机音乐模式' },
-          action: { type: 'string', enum: ['show', 'hide', 'close', 'play', 'pause', 'seek', 'set_volume', 'update'], description: 'show 显示/加载媒体；hide/close 关闭并销毁；play/pause 控制播放；seek 跳转；set_volume 调音量' },
-          url: { type: 'string', description: '媒体 URL（video/image 用）。必须是完整可访问 URL，参见工具描述规则' },
-          src: { type: 'string', description: '音频文件路径（music 模式用）。本地文件用 file:///绝对路径，或 HTTP 直链' },
-          title: { type: 'string', description: '媒体标题，可选' },
-          artist: { type: 'string', description: '艺术家/歌手名（music 模式用），可选' },
-          lrc: { type: 'string', description: 'LRC 格式歌词文本（music 模式用），可选。格式：[mm:ss.xx]歌词行' },
-          cover: { type: 'string', description: '封面图片路径或 URL（music 模式用），可选' },
-          alt: { type: 'string', description: '图片替代说明，可选' },
-          autoplay: { type: 'boolean', description: '是否自动播放，默认 true' },
-          muted: { type: 'boolean', description: '是否静音直链视频，默认 false' },
-          volume: { type: 'number', description: '音量 0-1' },
-          currentTime: { type: 'number', description: '跳转到的秒数' },
-          camera: { type: 'boolean', description: 'mode=video 时显式打开摄像头；默认 false' },
+          mode: { type: 'string', enum: ['video', 'camera', 'image', 'music'], description: 'video=right-side video mode; camera=right-side camera video; image=left-side image mode; music=right-side record-player mode.' },
+          action: { type: 'string', enum: ['show', 'hide', 'close', 'play', 'pause', 'seek', 'set_volume', 'update'], description: 'show loads media; hide/close closes and destroys it; play/pause controls playback; seek jumps; set_volume adjusts volume.' },
+          url: { type: 'string', description: 'Media URL for video/image. Must be a complete accessible URL following the tool rules.' },
+          src: { type: 'string', description: 'Audio file path for music mode. Use file:///absolute/path for local files or an HTTP direct audio link.' },
+          title: { type: 'string', description: 'Optional media title.' },
+          artist: { type: 'string', description: 'Optional artist name for music mode.' },
+          lrc: { type: 'string', description: 'Optional LRC-format lyrics for music mode, e.g. [mm:ss.xx]lyric line.' },
+          cover: { type: 'string', description: 'Optional cover image path or URL for music mode.' },
+          alt: { type: 'string', description: 'Optional image alt description.' },
+          autoplay: { type: 'boolean', description: 'Autoplay, default true.' },
+          muted: { type: 'boolean', description: 'Mute direct-link video, default false.' },
+          volume: { type: 'number', description: 'Volume 0-1.' },
+          currentTime: { type: 'number', description: 'Seconds to seek to.' },
+          camera: { type: 'boolean', description: 'Explicitly open camera when mode=video; default false.' },
         },
         required: ['mode']
       }
@@ -338,12 +338,37 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'hotspot_mode',
-      description: '控制热点面板。只在用户明确要求、演示/演戏需要、或当前任务确实需要可视化热点现场时使用；普通问答不要主动打开。status 用于查看当前开关状态。',
+      description: 'Control the hotspot panel. Use only when the user explicitly asks, when a demo/roleplay needs it, or when the current task truly needs a visual hotspot scene. Do not proactively open it for ordinary Q&A. status checks current state.',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['show', 'open', 'hide', 'close', 'toggle', 'status'], description: 'show/open 打开热点面板；hide/close 关闭；toggle 切换；status 只查询状态' },
-          reason: { type: 'string', description: '简短说明为什么需要打开或关闭，可选' },
+          action: { type: 'string', enum: ['show', 'open', 'hide', 'close', 'toggle', 'status'], description: 'show/open opens the hotspot panel; hide/close closes it; toggle switches it; status only checks state.' },
+          reason: { type: 'string', description: 'Optional short reason for opening or closing.' },
+        },
+        required: ['action']
+      }
+    }
+  },
+
+  open_doc_panel: {
+    type: 'function',
+    function: {
+      name: 'open_doc_panel',
+      description: 'Control the configuration documentation panel. Open it when the user needs voice, model, WeChat, or social-platform configuration help, or explicitly asks to open documentation. Close it when it is open but the conversation is unrelated to any configuration topic. Panel contents are injected as context for 30 minutes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['open', 'close'],
+            description: 'open opens the panel; close closes the panel.'
+          },
+          topic: {
+            type: 'string',
+            enum: ['voice_asr', 'voice_tts', 'voice_config', 'model_config', 'wechat_config'],
+            description: 'Required when action=open. Choose one topic: voice_asr, voice_tts, voice_config, model_config, or wechat_config. Do not invent other values. Optional when action=close.'
+          },
+          reason: { type: 'string', description: 'Optional short reason.' },
         },
         required: ['action']
       }
@@ -354,20 +379,20 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'person_card_mode',
-      description: '控制人物卡片面板。只在用户明确表示不认识某人、询问“某人是谁/哪位/为什么火”，或当前对话确实需要解释公众人物时使用；普通问答不要主动打开。可以传入基础资料更新卡片。',
+      description: 'Control the person-card panel. Use only when the user says they do not know someone, asks who someone is or why they are popular, or when the current conversation truly needs a public-figure explanation. Do not proactively open it for ordinary Q&A. Basic profile data can update the card.',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['show', 'open', 'hide', 'close', 'update', 'toggle', 'status'], description: 'show/open/update 打开或更新人物卡片；hide/close 关闭；toggle 切换；status 只查询状态' },
-          name: { type: 'string', description: '人物姓名，例如“周杰伦”' },
-          title: { type: 'string', description: '人物身份/头衔，例如“歌手 / 音乐人”' },
-          summary: { type: 'string', description: '一句到两句简介，避免编造不确定信息' },
-          knownFor: { type: 'array', items: { type: 'string' }, description: '代表作、代表事件或用户最需要知道的识别点' },
-          tags: { type: 'array', items: { type: 'string' }, description: '简短标签，例如“演员”“华语音乐”' },
-          aliases: { type: 'array', items: { type: 'string' }, description: '别名、英文名或常见昵称' },
-          image: { type: 'string', description: '人物大图 URL，可选，优先用于卡片主图' },
-          avatar: { type: 'string', description: '头像或人物图片 URL，可选' },
-          reason: { type: 'string', description: '简短说明为什么打开或关闭，可选' },
+          action: { type: 'string', enum: ['show', 'open', 'hide', 'close', 'update', 'toggle', 'status'], description: 'show/open/update opens or updates the person card; hide/close closes it; toggle switches it; status only checks state.' },
+          name: { type: 'string', description: 'Person name, e.g. Jay Chou.' },
+          title: { type: 'string', description: 'Identity or title, e.g. singer / musician.' },
+          summary: { type: 'string', description: 'One or two sentence summary. Avoid inventing uncertain information.' },
+          knownFor: { type: 'array', items: { type: 'string' }, description: 'Representative works, events, or recognition points the user most needs.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Short tags, e.g. actor or Mandopop.' },
+          aliases: { type: 'array', items: { type: 'string' }, description: 'Aliases, English names, or common nicknames.' },
+          image: { type: 'string', description: 'Optional large image URL, preferred for the card hero image.' },
+          avatar: { type: 'string', description: 'Optional avatar or person image URL.' },
+          reason: { type: 'string', description: 'Optional short reason for opening or closing.' },
         },
         required: ['action']
       }
@@ -378,28 +403,28 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'music',
-      description: `管理和播放本地音乐库。音乐文件存放在 music 目录下。
-支持的操作：
-  - list：列出音乐库所有曲目（含 id、title、artist、file_path）
-  - search：按歌曲名或艺术家名搜索
-  - download：用 yt-dlp 从 YouTube/BiliBili URL 下载为 mp3 并入库。下载后自动尝试获取歌词。
-  - add：把已存在的本地音频文件（mp3/flac/wav/aac）添加到库
-  - scan：扫描 music 目录，把所有音频文件批量入库
-  - get_lyrics：从 lrclib.net 获取 LRC 格式歌词并保存到库（需要 title + artist）
-  - delete：按 id 从库中移除曲目（不删除实际文件）
-播放时：用 media_mode 工具（mode=music，src=文件路径）弹出唱片机。播放前不需要发消息给用户，直接执行即可。`,
+      description: `Manage and play the local music library. Music files are stored under the music directory.
+Supported actions:
+  - list: list all tracks in the library, including id, title, artist, and file_path.
+  - search: search by song title or artist.
+  - download: use yt-dlp to download a YouTube/BiliBili URL as mp3 and add it to the library. Lyrics are fetched automatically when possible.
+  - add: add an existing local audio file, such as mp3/flac/wav/aac, to the library.
+  - scan: scan the music directory and add all audio files in batch.
+  - get_lyrics: fetch LRC lyrics from lrclib.net and save them to the library. Requires title + artist.
+  - delete: remove a track from the library by id without deleting the actual file.
+To play music, use media_mode with mode=music and src=file_path to show the record player. No chat reply is needed before playback; execute directly.`,
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['list', 'search', 'download', 'add', 'scan', 'get_lyrics', 'delete'], description: '操作类型' },
-          query:  { type: 'string', description: 'search 时的搜索词（歌名或艺术家）' },
-          url:    { type: 'string', description: 'download 时的 YouTube/BiliBili URL' },
-          path:   { type: 'string', description: 'add 时的本地音频文件绝对路径' },
-          title:  { type: 'string', description: '曲目名称，add/download/get_lyrics 时可提供' },
-          artist: { type: 'string', description: '艺术家名，add/download/get_lyrics 时可提供' },
-          album:  { type: 'string', description: '专辑名，可选' },
-          id:     { type: 'number', description: 'get_lyrics/delete 时指定曲目 id' },
-          limit:  { type: 'number', description: 'list/search 返回条数上限，默认 50' },
+          action: { type: 'string', enum: ['list', 'search', 'download', 'add', 'scan', 'get_lyrics', 'delete'], description: 'Action type.' },
+          query:  { type: 'string', description: 'Search query for search, usually song title or artist.' },
+          url:    { type: 'string', description: 'YouTube/BiliBili URL for download.' },
+          path:   { type: 'string', description: 'Absolute local audio file path for add.' },
+          title:  { type: 'string', description: 'Track title, useful for add/download/get_lyrics.' },
+          artist: { type: 'string', description: 'Artist name, useful for add/download/get_lyrics.' },
+          album:  { type: 'string', description: 'Optional album name.' },
+          id:     { type: 'number', description: 'Track id for get_lyrics/delete.' },
+          limit:  { type: 'number', description: 'Maximum rows returned by list/search, default 50.' },
         },
         required: ['action']
       }
@@ -410,51 +435,51 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'manage_reminder',
-      description: '管理提醒：创建（一次性 / 每天 / 每周几 / 每月几号）、列出、取消。到时系统会主动给你发系统消息让你继续执行。同 target_id + 同分钟的一次性提醒会自动合并任务，不会重复触发。创建后要 send_message 告诉用户。',
+      description: 'Manage reminders: create one-off/daily/weekly/monthly reminders, list them, or cancel them. When due, the system sends you a system message so you can continue execution. One-off reminders with the same target_id and minute are merged to avoid duplicate triggers. After creating a reminder, call send_message to tell the user.',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
             enum: ['create', 'list', 'cancel'],
-            description: 'create=新建提醒；list=列出所有待触发提醒；cancel=按 id 取消'
+            description: 'create creates a reminder; list lists pending reminders; cancel cancels by id.'
           },
           kind: {
             type: 'string',
             enum: ['once', 'daily', 'weekly', 'monthly'],
-            description: '仅 create 用：once=一次性（必须给 due_at）；daily=每天（给 time）；weekly=每周（给 time + weekday）；monthly=每月（给 time + day_of_month）。默认 once。'
+            description: 'For create only: once requires due_at; daily requires time; weekly requires time + weekday; monthly requires time + day_of_month. Defaults to once.'
           },
           task: {
             type: 'string',
-            description: '仅 create 用：到时间后你要执行的事项'
+            description: 'For create only: task to execute when the reminder fires.'
           },
           target_id: {
             type: 'string',
-            description: '仅 create 用：这条提醒最终服务的用户 ID，例如 ID:000001；默认使用当前对话对象'
+            description: 'For create only: final user ID served by this reminder, such as ID:000001. Defaults to the current conversation target.'
           },
           due_at: {
             type: 'string',
-            description: '仅 kind=once 用：提醒触发时间，必须是绝对时间 ISO 8601 字符串，例如 2026-04-21T06:00:00+08:00'
+            description: 'For kind=once only: trigger time as an absolute ISO 8601 timestamp, e.g. 2026-04-21T06:00:00+08:00.'
           },
           time: {
             type: 'string',
-            description: '仅 daily/weekly/monthly 用：每天/每周/每月的触发时间，HH:MM 格式（按本地时区），例如 09:00'
+            description: 'For daily/weekly/monthly only: trigger time in local timezone, HH:MM format, e.g. 09:00.'
           },
           weekday: {
             type: 'integer',
-            description: '仅 kind=weekly 用：星期几，0=周日，1=周一，...，6=周六',
+            description: 'For kind=weekly only: weekday, 0=Sunday, 1=Monday, ..., 6=Saturday.',
             minimum: 0,
             maximum: 6
           },
           day_of_month: {
             type: 'integer',
-            description: '仅 kind=monthly 用：每月几号，1-31。如果某月没有该日（例如 31 号），会跳到下一个有该日的月份',
+            description: 'For kind=monthly only: day of month, 1-31. If a month lacks that day, such as the 31st, the reminder jumps to the next month that has it.',
             minimum: 1,
             maximum: 31
           },
           id: {
             type: 'integer',
-            description: '仅 cancel 用：要取消的提醒 id（从 list 里查）'
+            description: 'For cancel only: reminder id to cancel, obtained from list.'
           }
         },
         required: ['action']
@@ -466,35 +491,35 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'manage_prefetch_task',
-      description: '管理预热任务——系统会在每次启动前自动 fetch 这些 URL 并注入到上下文里，无需再调 fetch_url。适合定期要查的内容（天气、新闻、价格等）。',
+      description: 'Manage prefetch tasks. The system automatically fetches these URLs before each startup and injects them into context, so fetch_url is not needed again. Suitable for recurring information such as weather, news, and prices.',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
             enum: ['add', 'remove', 'list'],
-            description: 'add=添加或更新任务，remove=删除任务，list=查看所有任务',
+            description: 'add adds or updates a task; remove deletes a task; list shows all tasks.',
           },
           source: {
             type: 'string',
-            description: '任务唯一标识，建议格式如 "weather:Beijing"、"news:36kr"。add/remove 时必填。',
+            description: 'Unique task identifier, recommended format like "weather:Beijing" or "news:36kr". Required for add/remove.',
           },
           label: {
             type: 'string',
-            description: '任务显示名称，如"北京天气"。add 时必填。',
+            description: 'Display label, e.g. "Beijing weather". Required for add.',
           },
           url: {
             type: 'string',
-            description: '要预热的 URL。add 时必填。',
+            description: 'URL to prefetch. Required for add.',
           },
           ttl_minutes: {
             type: 'number',
-            description: '缓存有效期（分钟），默认 60。天气建议 60，新闻建议 30，日历建议 720。',
+            description: 'Cache TTL in minutes, default 60. Suggested: weather 60, news 30, calendar 720.',
           },
           tags: {
             type: 'array',
             items: { type: 'string' },
-            description: '标签，如 ["weather", "Beijing"]，方便检索。',
+            description: 'Tags such as ["weather", "Beijing"] for easier retrieval.',
           },
         },
         required: ['action'],
@@ -506,13 +531,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'generate_music',
-      description: '根据描述和歌词生成一段音乐，保存为音频文件。可以先用 generate_lyrics 生成歌词，再传入此工具创作完整的歌曲。',
+      description: 'Generate music from a description and optional lyrics, then save it as an audio file. You can generate lyrics first with generate_lyrics, then pass them here to create a full song.',
       parameters: {
         type: 'object',
         properties: {
-          prompt: { type: 'string', description: '音乐风格和情感的描述，如"忧郁的钢琴曲"、"欢快的流行歌曲"' },
-          lyrics: { type: 'string', description: '歌词内容，可选。不提供则生成纯音乐（配合 instrumental: true）' },
-          instrumental: { type: 'boolean', description: '是否生成纯器乐（无人声），默认 false' },
+          prompt: { type: 'string', description: 'Music style and emotional description, such as melancholic piano or upbeat pop.' },
+          lyrics: { type: 'string', description: 'Optional lyrics. Omit to generate instrumental music, usually with instrumental=true.' },
+          instrumental: { type: 'boolean', description: 'Generate instrumental music without vocals, default false.' },
         },
         required: ['prompt']
       }
@@ -523,13 +548,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'generate_image',
-      description: '根据文字描述生成一张图片。图片生成每日限额 50 次。',
+      description: 'Generate images from a text description. Daily image generation limit is 50.',
       parameters: {
         type: 'object',
         properties: {
-          prompt: { type: 'string', description: '图片内容描述，越详细越好' },
-          aspect_ratio: { type: 'string', description: '宽高比，可选值：1:1（默认）、16:9、4:3、3:4、9:16' },
-          n: { type: 'number', description: '生成数量，1-4，默认 1' },
+          prompt: { type: 'string', description: 'Image description. More detail is better.' },
+          aspect_ratio: { type: 'string', description: 'Aspect ratio, optional values: 1:1 default, 16:9, 4:3, 3:4, 9:16.' },
+          n: { type: 'number', description: 'Number of images to generate, 1-4, default 1.' },
         },
         required: ['prompt']
       }
@@ -540,23 +565,23 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'search_memory',
-      description: '按多个关键词批量检索记忆库（FTS5 全文搜索）。每个关键词独立命中后合并去重，每条结果带 matched_by 字段标注命中关键词。识别器在写入新记忆前必须先调用此工具查重，命中已有 mem_id 则走 update，未命中则 insert。',
+      description: 'Search the memory database in batch by multiple keywords using FTS5 full-text search. Each keyword is searched independently, then results are merged and deduplicated. Each result includes matched_by. The recognizer must call this before writing new memories to deduplicate; existing mem_id means update, no match means insert.',
       parameters: {
         type: 'object',
         properties: {
           keywords: {
             type: 'array',
             items: { type: 'string' },
-            description: '关键词列表，1-8 个。建议同时给中英文/同义词以提高召回。'
+            description: 'Keyword list, 1-8 items. Include Chinese/English synonyms where useful to improve recall.'
           },
           limit_per_keyword: {
             type: 'number',
-            description: '每个关键词最多返回几条命中，默认 5。'
+            description: 'Maximum hits per keyword, default 5.'
           },
           type_filter: {
             type: 'string',
             enum: ['fact', 'person', 'object', 'knowledge', 'article'],
-            description: '可选：限定记忆类型。'
+            description: 'Optional memory type filter.'
           }
         },
         required: ['keywords']
@@ -568,7 +593,7 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'upsert_memory',
-      description: '批量写入或更新记忆节点。按 mem_id 去重：mem_id 命中已存在则 PATCH（未传字段保留），不存在则 INSERT。调用前应先用 search_memory 查重以决定 mem_id。命名规则：person_{ID}、object_{slug}、article_{url_hash8}、concept_{snake}、fact_{snake}。',
+      description: 'Batch insert or update memory nodes. Deduplicates by mem_id: existing mem_id means PATCH while omitted fields are preserved; new mem_id means INSERT. Use search_memory first to decide mem_id. Naming rules: person_{ID}, object_{slug}, article_{url_hash8}, concept_{snake}, fact_{snake}.',
       parameters: {
         type: 'object',
         properties: {
@@ -577,29 +602,29 @@ export const TOOL_SCHEMAS = {
             items: {
               type: 'object',
               properties: {
-                mem_id:        { type: 'string', description: '稳定 ID，遵循命名规则。' },
-                type:          { type: 'string', enum: ['fact', 'person', 'object', 'knowledge', 'article'], description: '记忆类型，新建必填。' },
-                title:         { type: 'string', description: '标题。文章直接用文章标题。新建必填。' },
-                content:       { type: 'string', description: '摘要 / 简要，<= 200 字。新建必填。' },
-                detail:        { type: 'string', description: '可选：更详细说明。' },
-                tags:          { type: 'array', items: { type: 'string' }, description: '可选：标签数组。' },
-                parent_mem_id: { type: 'string', description: '可选：父节点 mem_id。' },
+                mem_id:        { type: 'string', description: 'Stable ID following the naming rules.' },
+                type:          { type: 'string', enum: ['fact', 'person', 'object', 'knowledge', 'article'], description: 'Memory type. Required for new memories.' },
+                title:         { type: 'string', description: 'Title. For articles, use the article title. Required for new memories.' },
+                content:       { type: 'string', description: 'Summary, <= 200 Chinese characters. Required for new memories.' },
+                detail:        { type: 'string', description: 'Optional detailed explanation.' },
+                tags:          { type: 'array', items: { type: 'string' }, description: 'Optional tag array.' },
+                parent_mem_id: { type: 'string', description: 'Optional parent node mem_id.' },
                 links:         {
                   type: 'array',
                   items: {
                     type: 'object',
                     properties: {
                       target_mem_id: { type: 'string' },
-                      relation:      { type: 'string', description: '如 related_to / cites / contradicts' }
+                      relation:      { type: 'string', description: 'Relation such as related_to, cites, or contradicts.' }
                     }
                   },
-                  description: '可选：与其他记忆节点的关联。'
+                  description: 'Optional links to other memory nodes.'
                 },
-                body_path:     { type: 'string', description: 'article 类型：正文文件路径（来自 fetch_url / browser_read 的 body_path）。' }
+                body_path:     { type: 'string', description: 'For article type: full-text file path from fetch_url/browser_read body_path.' }
               },
               required: ['mem_id']
             },
-            description: '一次性批量写入的记忆数组，支持 1-N 条。'
+            description: 'Memory array for batch insert/update, supports 1-N items.'
           }
         },
         required: ['memories']
@@ -611,11 +636,11 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'skip_recognition',
-      description: '识别器专用：当本轮输入没有值得长期保存的记忆时调用，明确表示"已检阅，无须写入"。这是合法的终止信号，不要硬塞内容。',
+      description: 'Recognizer-only tool. Call when this turn contains nothing worth long-term storage, explicitly meaning "reviewed, no write needed." This is a valid stop signal; do not force weak content into memory.',
       parameters: {
         type: 'object',
         properties: {
-          reason: { type: 'string', description: '可选：简短理由。' }
+          reason: { type: 'string', description: 'Optional short reason.' }
         }
       }
     }
@@ -625,22 +650,22 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'ui_show',
-      description: '在用户界面上推送一张可视化卡片。仅当 UI 表达比纯文字更简洁、更直观时使用——能用一句话说清的事别开卡片。可用组件清单见标记为 skill.ui 的技能记忆；当前内置：WeatherCard。',
+      description: 'Push a visual card to the user interface. Use only when UI expression is clearer or more intuitive than plain text; do not open a card for something one sentence can explain. Available components are in skill.ui memories; currently built in: WeatherCard.',
       parameters: {
         type: 'object',
         properties: {
-          component: { type: 'string', description: '组件类型名，必须在注册表内（如 WeatherCard）' },
-          props:     { type: 'object', description: '组件参数，需符合该组件的 propsSchema' },
+          component: { type: 'string', description: 'Component type name. Must exist in the registry, e.g. WeatherCard.' },
+          props:     { type: 'object', description: 'Component props, must follow the component propsSchema.' },
           hint: {
             type: 'object',
-            description: '可选展示提示，控制卡片的形态。所有字段都有合理默认值。',
+            description: 'Optional display hint controlling card presentation. All fields have reasonable defaults.',
             properties: {
-              placement: { type: 'string', enum: ['notification', 'center', 'floating'], description: 'notification=右上滑入堆叠（通知性，默认）；center=居中带遮罩（重要/需确认）；floating=自由浮动可拖动（工具类/长留）' },
-              size:      { description: '尺寸：sm | md | lg | xl，或 { w, h } 像素对象。默认 md。', oneOf: [{ type: 'string', enum: ['sm', 'md', 'lg', 'xl'] }, { type: 'object', properties: { w: { type: ['number', 'string'] }, h: { type: ['number', 'string'] } } }] },
-              draggable: { type: 'boolean', description: '是否可拖动。floating 默认 true，其他默认 false。' },
-              modal:     { type: 'boolean', description: '是否带半透明遮罩。center 默认 true。' },
-              enter:     { type: 'string', description: '入场动画，默认按 placement 推断' },
-              exit:      { type: 'string', description: '出场动画，默认按 placement 推断' }
+              placement: { type: 'string', enum: ['notification', 'center', 'floating'], description: 'notification=top-right stacked slide-in, default; center=centered with overlay for important/confirmation content; floating=free draggable long-lived tool card.' },
+              size:      { description: 'Size: sm | md | lg | xl, or pixel object { w, h }. Default md.', oneOf: [{ type: 'string', enum: ['sm', 'md', 'lg', 'xl'] }, { type: 'object', properties: { w: { type: ['number', 'string'] }, h: { type: ['number', 'string'] } } }] },
+              draggable: { type: 'boolean', description: 'Whether draggable. floating defaults true; others default false.' },
+              modal:     { type: 'boolean', description: 'Whether to show a translucent overlay. center defaults true.' },
+              enter:     { type: 'string', description: 'Enter animation, inferred from placement by default.' },
+              exit:      { type: 'string', description: 'Exit animation, inferred from placement by default.' }
             }
           }
         },
@@ -653,11 +678,11 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'ui_hide',
-      description: '关闭一张已显示的卡片（会跑出场动画）。一般情况下让用户自己关，仅在卡片信息已失效时主动调用。',
+      description: 'Close a displayed card with its exit animation. Usually let the user close cards; proactively call only when the card information is stale.',
       parameters: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'ui_show 返回的卡片实例 id' }
+          id: { type: 'string', description: 'Card instance id returned by ui_show.' }
         },
         required: ['id']
       }
@@ -668,12 +693,12 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'ui_update',
-      description: '更新一张已显示卡片的内容（不会重放入场动画）。常用：用户问别的城市的天气时改 props，而不是开新卡。',
+      description: 'Update a displayed card without replaying the enter animation. Common use: change props when the user asks about another city weather instead of opening a new card.',
       parameters: {
         type: 'object',
         properties: {
-          id:    { type: 'string', description: 'ui_show 返回的卡片实例 id' },
-          props: { type: 'object', description: '新的 props，会与原 props 浅合并' }
+          id:    { type: 'string', description: 'Card instance id returned by ui_show.' },
+          props: { type: 'object', description: 'New props, shallow-merged with existing props.' }
         },
         required: ['id', 'props']
       }
@@ -684,21 +709,21 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'ui_show_inline',
-      description: '当现有组件无法满足表达需求时，临场写一个组件并立刻显示。两种模式：inline-template（仅 HTML+CSS，安全简单）、inline-script（完整 Web Component class，有交互/状态/动画）。优先选 inline-template，能不写 JS 就别写。验证可用且用户停留 dwell 良好后可调 ui_register 把它转正成永久组件。',
+      description: 'Create and display an ad-hoc component when existing components cannot express the need. Modes: inline-template for safe HTML+CSS only, and inline-script for a full Web Component with interaction/state/animation. Prefer inline-template; avoid JS when possible. After it proves useful and dwell is good, call ui_register to promote it to a permanent component.',
       parameters: {
         type: 'object',
         properties: {
-          mode:     { type: 'string', enum: ['inline-template', 'inline-script'], description: 'inline-template=纯模板，inline-script=完整 Web Component' },
-          template: { type: 'string', description: 'mode=inline-template 必填。纯 HTML 结构字符串，用 ${propName} 占位。绝对不要在 template 里写 <style> 标签——CSS 必须放在 styles 参数里，否则 CSS 代码会被当文字渲染出来。' },
-          styles:   { type: 'string', description: 'mode=inline-template 可选但强烈建议填写。所有 CSS 写在这里（不带 <style> 标签，只写规则），系统自动注入 Shadow DOM。不要把 CSS 放进 template。' },
-          code:     { type: 'string', description: 'mode=inline-script 必填。须以 export default class extends HTMLElement 开头，含 set props(v) 方法' },
-          props:    { type: 'object', description: '组件参数对象。模板没用到字段时可省略，会兜底成空对象。' },
+          mode:     { type: 'string', enum: ['inline-template', 'inline-script'], description: 'inline-template=pure template; inline-script=complete Web Component.' },
+          template: { type: 'string', description: 'Required for mode=inline-template. Pure HTML structure string using ${propName} placeholders. Never include <style> tags in template; CSS must go in styles or it may render as text.' },
+          styles:   { type: 'string', description: 'Optional but strongly recommended for mode=inline-template. Put all CSS rules here without <style> tags; the system injects them into Shadow DOM. Do not put CSS in template.' },
+          code:     { type: 'string', description: 'Required for mode=inline-script. Must start with export default class extends HTMLElement and include set props(v).' },
+          props:    { type: 'object', description: 'Component props object. Omit unused fields; the system falls back to an empty object.' },
           hint: {
             type: 'object',
-            description: '可选展示提示，与 ui_show 的 hint 字段含义一致：placement / size / draggable / modal / enter / exit',
+            description: 'Optional display hint, same meaning as ui_show hint: placement / size / draggable / modal / enter / exit.',
             properties: {
               placement: { type: 'string', enum: ['notification', 'center', 'floating'] },
-              size:      { description: 'sm | md | lg | xl 或 { w, h }', oneOf: [{ type: 'string', enum: ['sm', 'md', 'lg', 'xl'] }, { type: 'object' }] },
+              size:      { description: 'sm | md | lg | xl, or { w, h }.', oneOf: [{ type: 'string', enum: ['sm', 'md', 'lg', 'xl'] }, { type: 'object' }] },
               draggable: { type: 'boolean' },
               modal:     { type: 'boolean' },
               enter:     { type: 'string' },
@@ -715,34 +740,34 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'manage_app',
-      description: '管理已生成的交互式应用（游戏/工具）：保存为永久应用、重新打开、列出、删除。inline-script 组件在生成时代码已自动落盘为草稿，用 save 提升为正式应用后可随时 open 恢复。',
+      description: 'Manage generated interactive apps such as games/tools: save as permanent app, reopen, list, or delete. inline-script component code is saved as a draft when generated; use save to promote it to a formal app that can be reopened later.',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
             enum: ['save', 'open', 'list', 'delete'],
-            description: 'save=把 inline-script 草稿保存为永久应用；open=重新挂载已保存的应用（自动恢复上次状态）；list=列出所有已保存应用；delete=删除应用'
+            description: 'save promotes an inline-script draft to a permanent app; open remounts a saved app with automatic state restore; list lists saved apps; delete removes an app.'
           },
           name: {
             type: 'string',
-            description: '应用名，英文小写 snake_case，作为存储目录名，如 chess / todo_app。save / open / delete 必填。'
+            description: 'App name in lowercase snake_case, used as the storage directory, e.g. chess or todo_app. Required for save/open/delete.'
           },
           label: {
             type: 'string',
-            description: '可选：中文显示名，如"中国象棋"。save 时填写。'
+            description: 'Optional display label, e.g. Chinese chess. Provide when saving.'
           },
           draft_id: {
             type: 'string',
-            description: 'save 时必填：ui_show_inline 返回的组件实例 id（scratch-xxx）'
+            description: 'Required for save: component instance id returned by ui_show_inline, e.g. scratch-xxx.'
           },
           state: {
             type: 'object',
-            description: '可选：保存或打开时附带的状态。save 时传当前游戏状态；open 时传则覆盖磁盘上的已存状态。'
+            description: 'Optional state included when saving or opening. For save, pass current game/app state; for open, this overrides persisted state.'
           },
           hint: {
             type: 'object',
-            description: '可选：UI 展示参数（placement / size / draggable），save 时写入 meta，open 时复用。'
+            description: 'Optional UI display hint, such as placement / size / draggable. Written to metadata during save and reused during open.'
           }
         },
         required: ['action']
@@ -754,13 +779,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'ui_patch',
-      description: '向已挂载的应用组件发送操作指令或状态更新。组件内通过 this._app.onPatch() 监听。适用于游戏回合、状态机、画布更新等需要 agent 主动推送变化的场景。',
+      description: 'Send operation commands or state updates to a mounted app component. The component listens with this._app.onPatch(). Use for game turns, state machines, canvas updates, and other cases where the agent proactively pushes changes.',
       parameters: {
         type: 'object',
         properties: {
-          id:   { type: 'string', description: 'ui_show_inline 或 ui_show 返回的组件实例 id' },
-          op:   { type: 'string', description: '操作名，由组件内部定义，如 applyMove、setState、nextRound' },
-          data: { type: 'object', description: '操作数据，由组件内部解释' },
+          id:   { type: 'string', description: 'Component instance id returned by ui_show_inline or ui_show.' },
+          op:   { type: 'string', description: 'Operation name defined by the component, such as applyMove, setState, or nextRound.' },
+          data: { type: 'object', description: 'Operation data interpreted by the component.' },
         },
         required: ['id', 'op']
       }
@@ -771,15 +796,15 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'ui_register',
-      description: '把一个已经验证可用的内联组件转为永久组件：写 .js 文件 + 更新 registry + 写 ui-components.json + seed 一条 skill.ui 技能记忆。一般在内联组件成功使用 ≥2 次、用户没有立刻关闭、有 dwell 信号时调用。注册后，下次同类需求直接走 ui_show 就能复用。',
+      description: 'Promote a verified inline component to a permanent component: write a .js file, update registry, write ui-components.json, and seed one skill.ui memory. Usually call after the inline component succeeds at least twice, the user does not immediately close it, and dwell signals are good. After registration, future similar needs can use ui_show directly.',
       parameters: {
         type: 'object',
         properties: {
-          component_name: { type: 'string', description: 'PascalCase 组件名，未占用，如 TodoCard / VideoPlayer' },
-          code:           { type: 'string', description: '完整 Web Component class 代码，须含 static tagName / static propsSchema / static enter / static exit 字段，并以 customElements.define 注册收尾' },
-          props_schema:   { type: 'object', description: '与 code 内 propsSchema 一致的对象，用于后端校验镜像（{ field: { type, required } }）' },
-          use_case:       { type: 'string', description: '什么时候该用这个组件——会写入 skill.ui 记忆作为命中条件' },
-          example_call:   { type: 'string', description: 'ui_show 形式的调用示例' }
+          component_name: { type: 'string', description: 'Unused PascalCase component name, e.g. TodoCard or VideoPlayer.' },
+          code:           { type: 'string', description: 'Complete Web Component class code. Must include static tagName / static propsSchema / static enter / static exit and end with customElements.define.' },
+          props_schema:   { type: 'object', description: 'Object matching propsSchema in code, used as backend validation mirror, e.g. { field: { type, required } }.' },
+          use_case:       { type: 'string', description: 'When to use this component. Written into skill.ui memory as matching conditions.' },
+          example_call:   { type: 'string', description: 'Example ui_show call.' }
         },
         required: ['component_name', 'code', 'props_schema', 'use_case', 'example_call']
       }
@@ -790,15 +815,15 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'set_task',
-      description: '开启一个多步任务。提供任务总目标和具体步骤列表，系统将持久化追踪每步状态，重启后自动恢复。调用后 TICK 节奏加速以持续推进任务。每次只能有一个活跃任务。',
+      description: 'Start a multi-step task. Provide the overall goal and ordered steps. The system persistently tracks each step and restores after restart. Calling this accelerates TICK rhythm to keep progressing. Only one active task can exist at a time.',
       parameters: {
         type: 'object',
         properties: {
-          description: { type: 'string', description: '任务的总体目标，说明最终要完成什么' },
+          description: { type: 'string', description: 'Overall task goal: what should be completed in the end.' },
           steps: {
             type: 'array',
             items: { type: 'string' },
-            description: '按顺序执行的具体步骤列表，每步说明要做什么'
+            description: 'Ordered concrete steps, each describing what to do.'
           }
         },
         required: ['description', 'steps']
@@ -810,11 +835,11 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'complete_task',
-      description: '标记当前任务全部完成。将停止加速 TICK，写入完成记录，清除任务状态。所有步骤完成后调用。',
+      description: 'Mark the current task fully complete. Stops accelerated TICK, writes a completion record, and clears task state. Call after all steps are complete.',
       parameters: {
         type: 'object',
         properties: {
-          summary: { type: 'string', description: '任务完成情况的简短总结（可选）' }
+          summary: { type: 'string', description: 'Optional short completion summary.' }
         },
         required: []
       }
@@ -825,17 +850,17 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'update_task_step',
-      description: '更新当前任务某个步骤的完成状态。每完成、失败或跳过一个步骤时立即调用，用于实时追踪进度。',
+      description: 'Update completion status for one step of the current task. Call immediately when a step is done, failed, or skipped so progress is tracked in real time.',
       parameters: {
         type: 'object',
         properties: {
-          step_index: { type: 'number', description: '步骤编号，从 0 开始（第一步为 0，第二步为 1）' },
+          step_index: { type: 'number', description: 'Step index starting from 0.' },
           status: {
             type: 'string',
             enum: ['done', 'failed', 'skipped'],
-            description: '步骤状态：done（完成）、failed（失败）、skipped（跳过）'
+            description: 'Step status: done, failed, or skipped.'
           },
-          note: { type: 'string', description: '该步骤执行结果的补充说明（可选）' }
+          note: { type: 'string', description: 'Optional note about the step result.' }
         },
         required: ['step_index', 'status']
       }
@@ -846,13 +871,48 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'recall_memory',
-      description: '深度检索与指定主题相关的记忆，立即返回结果，并在下一轮持续聚焦此主题。比 search_memory 更深层——不只当场返回结果，还影响下一轮的记忆注入方向。适合需要深入回忆某段经历或某个概念时使用。',
+      description: 'Deeply retrieve memories related to a topic, return results immediately, and keep focusing on this topic in the next turn. Deeper than search_memory because it affects the next memory injection direction. Use when you need to recall an experience or concept in depth.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '想要回忆的内容或主题' }
+          query: { type: 'string', description: 'Content or topic to recall.' }
         },
         required: ['query']
+      }
+    }
+  },
+
+  complete_startup_self_check: {
+    type: 'function',
+    function: {
+      name: 'complete_startup_self_check',
+      description: 'Mark the one-time L2 startup self-check as complete after environment exploration and capability checks have finished. This persists a config flag and memory so the check will not repeat on future startups.',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: {
+            type: 'string',
+            description: 'Brief human-readable summary of the startup self-check result.'
+          },
+          results: {
+            type: 'object',
+            description: 'Per-capability result map. Suggested keys: filesystem, web_search, hotspot_panel, music_player, focus_banner, ui_card. Each value should include status and detail.',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                status: {
+                  type: 'string',
+                  description: 'ok, degraded, error, skipped_no_tracks, skipped_no_ui_client, or another concise status.'
+                },
+                detail: {
+                  type: 'string',
+                  description: 'Short detail from the check.'
+                }
+              }
+            }
+          }
+        },
+        required: ['summary', 'results']
       }
     }
   },
@@ -861,34 +921,34 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'focus_banner',
-      description: '在桌面显示一个半透明的专注横幅贴纸，提醒用户当前要专注完成的任务。当用户说"我要专心做某件事"、"进入专注模式"、"帮我专注做 X"时调用。横幅可展开显示任务列表，支持勾选完成。',
+      description: 'Show a translucent desktop focus banner sticker reminding the user what to focus on. Call when the user says they want to focus on something, enter focus mode, or asks for help focusing on X. The banner can expand to show a task list with checkboxes.',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
             enum: ['show', 'update', 'hide'],
-            description: 'show: 显示横幅；update: 更新内容（横幅已存在时）；hide: 关闭横幅'
+            description: 'show displays the banner; update changes content when it already exists; hide closes it.'
           },
           task: {
             type: 'string',
-            description: '主任务标题，一句话，简短'
+            description: 'Main task title, one short sentence.'
           },
           current_step: {
             type: 'string',
-            description: '当前正在执行的步骤（可选），折叠状态下显示在主任务下方'
+            description: 'Optional current step, shown under the main task when collapsed.'
           },
           tasks: {
             type: 'array',
             items: {
               type: 'object',
               properties: {
-                text: { type: 'string', description: '子任务文字' },
-                done: { type: 'boolean', description: '是否已完成，默认 false' }
+                text: { type: 'string', description: 'Subtask text.' },
+                done: { type: 'boolean', description: 'Whether completed, default false.' }
               },
               required: ['text']
             },
-            description: '子任务列表，展开横幅后显示，可选'
+            description: 'Optional subtask list shown when the banner is expanded.'
           }
         },
         required: ['action']
@@ -900,13 +960,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'set_location',
-      description: '记录用户当前所在城市或地区，用于天气查询等地理相关功能。当用户告知自己的位置（如"我在北京"、"我现在在上海"）时调用。',
+      description: 'Record the user current city or region for weather and other location-related features. Call when the user tells you their location.',
       parameters: {
         type: 'object',
         properties: {
           city: {
             type: 'string',
-            description: '城市名称，如"北京"、"上海"、"London"'
+            description: 'City name, such as Beijing, Shanghai, or London.'
           }
         },
         required: ['city']

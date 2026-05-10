@@ -7,6 +7,7 @@ import { ThoughtStream } from "./thought-stream.js";
 import { initVoicePanel } from "./voice-panel.js";
 import { initHotspot, toggleHotspot, setHotspotMode, moveVoicePanelToBody, restoreVoicePanel } from "./hotspot.js";
 import { initPersonCard, setPersonCardMode, showPersonCardByName, extractPersonCardQuery, updatePersonCardFromAssistantText } from "./person-card.js";
+import { initDocPanel, setDocPanelMode } from "./doc.js";
 renderBrainUiApp(document.body);
 const THEME_KEY = "jarvis-brain-ui-theme";
 const PHYSICS_STORAGE_KEY = "jarvis-brain-ui-physics";
@@ -1228,6 +1229,9 @@ function handle({ type, data = {} }) {
     case "hotspot_mode":
       setHotspotMode(!!data.active || data.action === "show" || data.action === "open", { source: "agent_event" });
       break;
+    case "doc_panel_mode":
+      setDocPanelMode(!!data.active || data.action === "open", { topicId: data.topic || null, source: "agent_event" });
+      break;
     case "person_card_mode":
       setPersonCardMode(!!data.active || data.action === "show" || data.action === "open" || data.action === "update", { source: "agent_event", card: data.card || null });
       break;
@@ -1357,6 +1361,7 @@ if (MEMORY_GRAPH_ENABLED) {
 connectSSE();
 loadAgentProfile();
 initPersonCard();
+initDocPanel().catch((err) => console.warn('[DocPanel] 初始化失败:', err));
 chat.restoreChatHistory();
 initUpdaterUi();
 chat.unlockAudioOnFirstGesture();
@@ -1426,6 +1431,8 @@ function initTTSSettings() {
       const ttsBody = { ttsProvider: providerSel.value };
       const voiceId  = voiceSel?.value?.trim();
       if (voiceId) ttsBody.ttsVoiceId = voiceId;
+      const minimaxKey = document.getElementById("tts-minimax-key")?.value?.trim();
+      if (minimaxKey) ttsBody.minimaxKey = minimaxKey;
       const doubaoKey = document.getElementById("tts-doubao-key")?.value?.trim();
       if (doubaoKey) ttsBody.doubaoKey = doubaoKey;
       const openaiKey = document.getElementById("tts-openai-key")?.value?.trim();
@@ -1444,7 +1451,7 @@ function initTTSSettings() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(ttsBody),
       }).then(() => {
-        ["tts-doubao-key", "tts-openai-key", "tts-elevenlabs-key", "tts-volcano-token"].forEach(id => {
+        ["tts-minimax-key", "tts-doubao-key", "tts-openai-key", "tts-elevenlabs-key", "tts-volcano-token"].forEach(id => {
           const el = document.getElementById(id);
           if (el) el.value = "";
         });
@@ -1462,6 +1469,8 @@ function initTTSSettings() {
         const preBody = { ttsProvider: providerSel.value };
         const currentVoice = voiceSel?.value?.trim();
         if (currentVoice) preBody.ttsVoiceId = currentVoice;
+        const minimaxKey2 = document.getElementById("tts-minimax-key")?.value?.trim();
+        if (minimaxKey2) preBody.minimaxKey = minimaxKey2;
         const doubaoKey = document.getElementById("tts-doubao-key")?.value?.trim();
         if (doubaoKey) preBody.doubaoKey = doubaoKey;
         const openaiKey = document.getElementById("tts-openai-key")?.value?.trim();

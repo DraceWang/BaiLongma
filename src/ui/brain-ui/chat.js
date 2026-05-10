@@ -214,11 +214,19 @@ export function initChat({
       const backendText = (typeof override === "string") ? override : text;
       const payload = { content: backendText, from_id: "ID:000001" };
       if (channel) payload.channel = channel;
-      await fetch(`${apiBase}/message`, {
+      const resp = await fetch(`${apiBase}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (!resp.ok) {
+        let message = `HTTP ${resp.status}`;
+        try {
+          const body = await resp.json();
+          message = body.error || body.message || message;
+        } catch {}
+        throw new Error(message);
+      }
     } catch (error) {
       console.warn("[send]", error.message);
       addMsg("jarvis", "消息发送失败，请检查本地服务是否启动。");

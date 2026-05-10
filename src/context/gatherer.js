@@ -31,25 +31,25 @@ function throwIfAborted(signal) {
   }
 }
 
-const CHECKER_PROMPT = `你是上下文充分性检查器。判断当前注入的知识和经验是否足以处理任务的下一步。
+const CHECKER_PROMPT = `You are a context sufficiency checker. Decide whether the currently injected knowledge and experience are enough for the next step of the task.
 
-【输出规则】
-- 只输出 JSON，不输出任何其他内容
-- 如果上下文已足够，输出：{"sufficient":true}
-- 如果不够，输出：{"sufficient":false,"needs":[...]}
+Output rules:
+- Output JSON only. Do not output any other text.
+- If the context is sufficient, output: {"sufficient":true}
+- If the context is insufficient, output: {"sufficient":false,"needs":[...]}
 
-【needs 类型】
-- {"type":"read_file","path":"相对路径"} — 需要读取某个文件的内容
-- {"type":"search_memory","keyword":"关键词"} — 需要搜索记忆中的相关信息
-- {"type":"recall","query":"查询内容"} — 需要回忆某个具体概念或经验
+Need types:
+- {"type":"read_file","path":"relative path"} means a file must be read.
+- {"type":"search_memory","keyword":"keyword"} means relevant memory should be searched.
+- {"type":"recall","query":"query"} means a specific concept or experience should be recalled.
 
-【判断原则】
-- 任务涉及修改/调用某文件或函数，但不知道其结构 → 需要 read_file
-- 任务依赖某个之前学到的知识但当前上下文没有 → 需要 search_memory
-- 任务涉及某个具体概念/决策但不确定 → 需要 recall
-- 已有足够信息可以直接动手 → sufficient: true
-- 最多输出 3 个 needs，挑最关键的
-- 宁可 sufficient: true 少取，也不要无限循环取文件`
+Judgment rules:
+- If the task modifies or calls a file/function but its structure is unknown, request read_file.
+- If the task depends on previously learned knowledge that is not in the current context, request search_memory.
+- If the task involves a specific concept or decision and the current context is uncertain, request recall.
+- If there is enough information to act, return sufficient: true.
+- Output at most 3 needs. Choose the most important ones.
+- Prefer sufficient: true with less context over looping forever to fetch files.`
 
 /**
  * 主入口：采集足够上下文后返回 extraContext 数组
@@ -94,22 +94,22 @@ export async function gatherContext({ task, taskKnowledge, memories, message, si
 
 async function checkSufficiency({ task, taskKnowledge, memories, message, extraContext, signal }) {
   const extraSection = extraContext.length > 0
-    ? '\n\n已补充上下文：\n' + extraContext.map(c => `[${c.label}]\n${c.content.slice(0, 500)}`).join('\n')
+    ? '\n\nAdditional context already gathered:\n' + extraContext.map(c => `[${c.label}]\n${c.content.slice(0, 500)}`).join('\n')
     : ''
 
-  const input = `当前任务：
+  const input = `Current task:
 ${task}
 
-当前输入：
+Current input:
 ${message.slice(0, 300)}
 
-任务知识库：
-${taskKnowledge || '（空）'}
+Task knowledge base:
+${taskKnowledge || '(empty)'}
 
-记忆摘要：
-${memories || '（空）'}${extraSection}
+Memory summary:
+${memories || '(empty)'}${extraSection}
 
-请判断：以上信息是否足以处理任务的当前步骤？`
+Question: Is the information above sufficient for the current step of the task?`
 
   let raw
   try {
@@ -192,7 +192,7 @@ function resolveMemorySearch(keyword) {
   console.log(`[采集器] 搜索记忆 "${keyword}": ${results.length} 条`)
   return {
     type: 'memory',
-    label: `记忆搜索「${keyword}」`,
+    label: `Memory search: ${keyword}`,
     source: `search_memory:${keyword}`,
     content: results.map(m => `- ${m.content}\n  ${m.detail}`).join('\n'),
   }

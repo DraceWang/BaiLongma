@@ -13,6 +13,7 @@ import { isDailyLimitReached } from '../quota.js'
 import { setCustomInterval as setTickerInterval, getStatus as getTickerStatus } from '../ticker.js'
 import { setHotspotPanelState, getHotspotPanelState } from '../hotspots.js'
 import { setPersonCardPanelState, getPersonCardPanelState, getPersonCard } from '../person-cards.js'
+import { setDocPanelState, getDocPanelState } from '../docs.js'
 import { setUserLocation } from '../weather.js'
 
 // 后台进程注册表：pid → { process, command, startedAt }
@@ -143,8 +144,10 @@ const TOOL_RISK = {
   set_tick_interval: 'medium',
   media_mode: 'low',
   hotspot_mode: 'low',
+  open_doc_panel: 'low',
   person_card_mode: 'low',
   music: 'low',
+  complete_startup_self_check: 'low',
   delete_file: 'high',
   exec_command: 'high',
   kill_process: 'high',
@@ -335,6 +338,8 @@ async function executeToolUnchecked(name, args, context = {}) {
         return execMediaMode(args)
       case 'hotspot_mode':
         return execHotspotMode(args)
+      case 'open_doc_panel':
+        return execOpenDocPanel(args)
       case 'person_card_mode':
         return execPersonCardMode(args)
       case 'music':
@@ -362,6 +367,8 @@ async function executeToolUnchecked(name, args, context = {}) {
         return execFocusBanner(args)
       case 'set_location':
         return execSetLocation(args)
+      case 'complete_startup_self_check':
+        return execCompleteStartupSelfCheck(args, context)
       case 'set_task':
         return execSetTask(args, context)
       case 'complete_task':
@@ -414,7 +421,7 @@ function resolveAllowedTargetId(targetId, allowedTargetIds = []) {
   const normalizedTarget = normalizeConversationPartyId(targetId)
   const normalizedAllowed = [...new Set((allowedTargetIds || []).map(id => normalizeConversationPartyId(id)).filter(Boolean))]
   if (!normalizedAllowed.length) {
-    throw new Error('当前提示词未明确注入任何可发送的目标实体，禁止发送消息')
+    throw new Error('The current prompt did not explicitly inject any sendable target entities, so sending a message is forbidden.')
   }
 
   if (normalizedAllowed.includes(normalizedTarget)) {
@@ -425,34 +432,34 @@ function resolveAllowedTargetId(targetId, allowedTargetIds = []) {
   const targetCompact = compact(normalizedTarget)
   const fuzzyMatches = normalizedAllowed.filter(id => compact(id) === targetCompact)
   if (fuzzyMatches.length === 1) {
-    console.log(`[send_message] ID 严格校验通过（模糊归一）: "${targetId}" → "${fuzzyMatches[0]}"`)
+    console.log(`[send_message] ID strict validation passed by fuzzy normalization: "${targetId}" -> "${fuzzyMatches[0]}"`)
     return fuzzyMatches[0]
   }
 
-  throw new Error(`target_id "${targetId}" 不在当前提示词明确注入的目标实体列表中：${normalizedAllowed.join(', ')}`)
+  throw new Error(`target_id "${targetId}" is not in the target entity list explicitly injected into the current prompt: ${normalizedAllowed.join(', ')}`)
 }
 
 function assertVisibleTargetId(targetId, visibleTargetIds = []) {
   const normalizedTarget = normalizeConversationPartyId(targetId)
   const normalizedVisible = [...new Set((visibleTargetIds || []).map(id => normalizeConversationPartyId(id)).filter(Boolean))]
   if (!normalizedVisible.length) {
-    throw new Error('当前二层提示词未注入任何对话对象，禁止发送消息')
+    throw new Error('The current L2 prompt did not inject any conversation targets, so sending a message is forbidden.')
   }
 
   if (normalizedVisible.includes(normalizedTarget)) {
     return normalizedTarget
   }
 
-  throw new Error(`target_id "${targetId}" 未出现在当前二层注入的对话记录中：${normalizedVisible.join(', ')}`)
+  throw new Error(`target_id "${targetId}" does not appear in the conversation records injected into the current L2 prompt: ${normalizedVisible.join(', ')}`)
 }
 
 function parseReminderDueAt(value) {
   if (!value || typeof value !== 'string') {
-    throw new Error('未提供 due_at')
+    throw new Error('due_at was not provided')
   }
   const dueAt = new Date(value.trim())
   if (Number.isNaN(dueAt.getTime())) {
-    throw new Error('due_at 必须是合法的 ISO 8601 绝对时间，例如 2026-04-21T06:00:00+08:00')
+    throw new Error('due_at must be a valid ISO 8601 absolute time, for example 2026-04-21T06:00:00+08:00')
   }
   return dueAt
 }
@@ -526,9 +533,9 @@ async function execSendMessage({ target_id, content }, context = {}) {
 
 function parseHourMinute(value, label = 'time') {
   const m = String(value || '').trim().match(/^(\d{1,2}):(\d{2})$/)
-  if (!m) throw new Error(`${label} 必须是 HH:MM 格式，例如 09:00`)
+  if (!m) throw new Error(`${label} must use HH:MM format, for example 09:00`)
   const hour = Number(m[1]), minute = Number(m[2])
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) throw new Error(`${label} 超出合法范围`)
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) throw new Error(`${label} is outside the valid range`)
   return { hour, minute }
 }
 
@@ -546,7 +553,7 @@ export function calculateNextDueAt(type, config, fromDate = new Date()) {
   if (type === 'weekly') {
     const targetWeekday = Number(config.weekday)
     if (!Number.isInteger(targetWeekday) || targetWeekday < 0 || targetWeekday > 6) {
-      throw new Error('weekday 必须是 0-6 之间的整数（0=周日）')
+      throw new Error('weekday must be an integer from 0 to 6 (0=Sunday)')
     }
     const next = new Date(now)
     next.setHours(hour, minute, 0, 0)
@@ -558,7 +565,7 @@ export function calculateNextDueAt(type, config, fromDate = new Date()) {
   if (type === 'monthly') {
     const targetDay = Number(config.day_of_month)
     if (!Number.isInteger(targetDay) || targetDay < 1 || targetDay > 31) {
-      throw new Error('day_of_month 必须是 1-31 之间的整数')
+      throw new Error('day_of_month must be an integer from 1 to 31')
     }
     let year = now.getFullYear(), month = now.getMonth()
     for (let i = 0; i < 12; i++) {
@@ -570,13 +577,13 @@ export function calculateNextDueAt(type, config, fromDate = new Date()) {
       month++
       if (month > 11) { month = 0; year++ }
     }
-    throw new Error('找不到下一个匹配的月份')
+    throw new Error('Could not find the next matching month')
   }
-  throw new Error(`未知的 recurrence kind: ${type}`)
+  throw new Error(`Unknown recurrence kind: ${type}`)
 }
 
 function buildSystemMessage(targetId, taskText) {
-  return `我是系统，根据你设置的提醒，你现在要为用户 ${targetId} 执行这件事：${taskText}。请立即处理，并在需要时通过 send_message 把结果发给 ${targetId}。`
+  return `I am the system. Based on the reminder you set, you now need to perform this task for user ${targetId}: ${taskText}. Handle it immediately, and when needed use send_message to send the result to ${targetId}.`
 }
 
 function formatReminderRow(r) {
@@ -1035,6 +1042,45 @@ const WEB_HEADERS = {
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
 }
 
+// 从 config.json 或 process.env 读取上网工具配置
+function readWebConfig() {
+  try {
+    const raw = fs.readFileSync(paths.configFile, 'utf-8')
+    const parsed = JSON.parse(raw)
+    return {
+      serperKey: parsed.serper_api_key || process.env.SERPER_API_KEY || '',
+      searxngUrl: parsed.searxng_url || process.env.SEARXNG_URL || '',
+    }
+  } catch {
+    return {
+      serperKey: process.env.SERPER_API_KEY || '',
+      searxngUrl: process.env.SEARXNG_URL || '',
+    }
+  }
+}
+
+// 单例浏览器：避免每次 browser_read 冷启动 Chromium（耗时 3~5 秒）
+let _sharedBrowser = null
+let _sharedBrowserLastUsed = 0
+const BROWSER_IDLE_TIMEOUT_MS = 10 * 60 * 1000  // 闲置 10 分钟后关掉
+
+async function getSharedBrowser() {
+  const now = Date.now()
+  if (_sharedBrowser && now - _sharedBrowserLastUsed > BROWSER_IDLE_TIMEOUT_MS) {
+    try { await _sharedBrowser.close() } catch {}
+    _sharedBrowser = null
+  }
+  if (!_sharedBrowser) {
+    _sharedBrowser = await launchReadableBrowser()
+  }
+  _sharedBrowserLastUsed = Date.now()
+  return _sharedBrowser
+}
+
+function invalidateSharedBrowser() {
+  _sharedBrowser = null
+}
+
 const BROWSER_VIEWPORT = { width: 1365, height: 900 }
 
 function webJson(payload) {
@@ -1185,6 +1231,135 @@ function parseDuckDuckGoResults(html, limit) {
   return results
 }
 
+// web_search 引擎1：Serper.dev（Google SERP JSON API，最稳定）
+async function searchViaSerper(query, limit, signal) {
+  const { serperKey } = readWebConfig()
+  if (!serperKey) return null
+
+  const merged = createMergedAbortSignal(signal, 12000)
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': serperKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ q: query, num: limit, hl: 'zh-cn', gl: 'cn' }),
+      signal: merged?.signal,
+    })
+    merged?.cleanup()
+    if (!res.ok) return null
+    const data = await res.json()
+    const results = (data.organic || []).slice(0, limit).map(r => ({
+      title: String(r.title || ''),
+      url: String(r.link || ''),
+      snippet: String(r.snippet || ''),
+    }))
+    if (results.length === 0) return null
+    return { results, source: 'serper' }
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    return null
+  }
+}
+
+// web_search 引擎2：SearXNG（自托管，JSON API）
+async function searchViaSearXNG(query, limit, signal) {
+  const { searxngUrl } = readWebConfig()
+  if (!searxngUrl) return null
+
+  const base = searxngUrl.replace(/\/$/, '')
+  const url = `${base}/search?q=${encodeURIComponent(query)}&format=json&pageno=1`
+  const merged = createMergedAbortSignal(signal, 12000)
+  try {
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: merged?.signal })
+    merged?.cleanup()
+    if (!res.ok) return null
+    const data = await res.json()
+    const results = (data.results || []).slice(0, limit).map(r => ({
+      title: String(r.title || ''),
+      url: String(r.url || ''),
+      snippet: String(r.content || ''),
+    }))
+    if (results.length === 0) return null
+    return { results, source: 'searxng' }
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    return null
+  }
+}
+
+// web_search 引擎3：Jina Search（s.jina.ai，免费无需 key，稳定）
+async function searchViaJina(query, limit, signal) {
+  const url = `https://s.jina.ai/${encodeURIComponent(query)}`
+  const merged = createMergedAbortSignal(signal, 18000)
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'Accept': 'text/plain',
+        'X-Respond-With': 'no-references',
+        'User-Agent': WEB_HEADERS['User-Agent'],
+      },
+      signal: merged?.signal,
+    })
+    merged?.cleanup()
+    if (!res.ok) return null
+    const text = (await res.text()).trim()
+    if (!text || text.length < 50) return null
+
+    // Jina Search 返回格式：
+    // [1] 标题
+    // URL: https://...
+    // Description: 摘要...
+    //
+    // [2] ...
+    const results = []
+    const blocks = text.split(/\n(?=\[\d+\])/)
+    for (const block of blocks) {
+      if (results.length >= limit) break
+      const titleMatch = block.match(/^\[\d+\]\s*(.+)/)
+      const urlMatch = block.match(/^URL:\s*(\S+)/m)
+      const descMatch = block.match(/^Description:\s*(.+)/m)
+      if (titleMatch && urlMatch) {
+        results.push({
+          title: titleMatch[1].trim(),
+          url: urlMatch[1].trim(),
+          snippet: (descMatch?.[1] || '').trim().slice(0, 300),
+        })
+      }
+    }
+    if (results.length === 0) return null
+    return { results, source: 'jina_search' }
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    return null
+  }
+}
+
+// web_search 引擎4：DuckDuckGo HTML（最后兜底，不稳定）
+async function searchViaDDG(query, limit, signal) {
+  const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+  const merged = createMergedAbortSignal(signal, 15000)
+  try {
+    const res = await fetch(searchUrl, { headers: WEB_HEADERS, signal: merged?.signal })
+    merged?.cleanup()
+    if (!res.ok) return null
+    const html = await res.text()
+    // DDG 返回 403/CAPTCHA 页时 HTML 中不含 result__a，直接返回 null
+    if (!html.includes('result__a')) return null
+    const results = parseDuckDuckGoResults(html, limit)
+    if (results.length === 0) return null
+    return { results, source: 'duckduckgo' }
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    return null
+  }
+}
+
 async function execWebSearch(args, context = {}) {
   throwIfAborted(context.signal)
   const query = String(args.query || args.q || args.keyword || '').trim()
@@ -1197,30 +1372,94 @@ async function execWebSearch(args, context = {}) {
     return webJson({ ...cached.payload, cached: true })
   }
 
-  const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`
   console.log(`[web_search] ${query}`)
-  const merged = createMergedAbortSignal(context.signal, 12000)
-  let res
+
+  // 依次尝试：Serper → SearXNG → Jina Search（免费）→ DuckDuckGo（兜底）
+  const engines = [searchViaSerper, searchViaSearXNG, searchViaJina, searchViaDDG]
+  let lastErr = null
+  for (const engine of engines) {
+    throwIfAborted(context.signal)
+    try {
+      const result = await engine(query, limit, context.signal)
+      if (result) {
+        const payload = {
+          ok: true, tool: 'web_search', query,
+          source: result.source,
+          results: result.results,
+          hint: 'Open 1-3 reliable result URLs with fetch_url, then answer the user.',
+        }
+        searchCache.set(cacheKey, { payload, fetchedAt: Date.now() })
+        return webJson(payload)
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') throw err
+      lastErr = err
+    }
+  }
+
+  return webJson({
+    ok: false, tool: 'web_search', query,
+    error: lastErr?.message || 'all search engines failed',
+    hint: 'All search engines failed. Try fetch_url with a known URL, or configure SERPER_API_KEY for reliable search.',
+  })
+}
+
+// fetch_url 策略一：Jina Reader（r.jina.ai）
+// 服务端 Chromium 渲染 + Mozilla Readability，免费无需 key，支持 JS 页面
+async function fetchViaJina(url, signal) {
+  const jinaUrl = `https://r.jina.ai/${url}`
+  const merged = createMergedAbortSignal(signal, 20000)
   try {
-    res = await fetch(searchUrl, { headers: WEB_HEADERS, signal: merged?.signal })
+    const res = await fetch(jinaUrl, {
+      headers: {
+        'Accept': 'text/plain',
+        'X-Return-Format': 'markdown',
+        'X-Timeout': '15',
+        'User-Agent': WEB_HEADERS['User-Agent'],
+      },
+      signal: merged?.signal,
+    })
+    merged?.cleanup()
+    if (!res.ok) return null
+    const text = (await res.text()).trim()
+    if (isLowValuePageText(text)) return null
+    // Jina 返回格式：第一行是 "Title: xxx"，第二行空行，然后是正文 Markdown
+    let title = ''
+    let body = text
+    const titleMatch = text.match(/^Title:\s*(.+)/m)
+    if (titleMatch) {
+      title = titleMatch[1].trim()
+      body = text.replace(/^Title:.*\n?/m, '').replace(/^URL Source:.*\n?/m, '').replace(/^Markdown Content:\n?/m, '').trim()
+    }
+    return { title, body, source: 'jina' }
   } catch (err) {
     merged?.cleanup()
     if (err.name === 'AbortError') throw err
-    return webJson({ ok: false, tool: 'web_search', query, error: err.message, hint: 'Search request failed. Try a more specific query or fetch a known reliable URL.' })
+    return null
   }
-  merged?.cleanup()
+}
 
-  if (!res.ok) {
-    return webJson({ ok: false, tool: 'web_search', query, status: res.status, error: `HTTP ${res.status}`, hint: 'Search engine rejected the request. Try fetch_url with a known URL.' })
+// fetch_url 策略二：直接 HTTP + 正则 HTML 转文本（兜底，适合简单静态页）
+async function fetchViaDirect(url, signal) {
+  const merged = createMergedAbortSignal(signal, 12000)
+  try {
+    const res = await fetch(url, { headers: WEB_HEADERS, signal: merged?.signal })
+    merged?.cleanup()
+    if (!res.ok) return { ok: false, status: res.status }
+    const contentType = res.headers.get('content-type') || ''
+    if (contentType && !/text|html|xml|json/i.test(contentType)) {
+      return { ok: false, status: res.status, content_type: contentType }
+    }
+    const html = await res.text()
+    const text = htmlToText(html)
+    const title = extractTitle(html)
+    if (isLowValuePageText(text)) return { ok: false, status: res.status, title, low_value: true }
+    return { ok: true, status: res.status, title, body: text }
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    return { ok: false, error: err.message }
   }
-
-  const html = await res.text()
-  const results = parseDuckDuckGoResults(html, limit)
-  const payload = results.length > 0
-    ? { ok: true, tool: 'web_search', query, source: 'duckduckgo_html', results, hint: 'Open 1-3 reliable result URLs with fetch_url, then answer the user.' }
-    : { ok: false, tool: 'web_search', query, source: 'duckduckgo_html', results: [], error: 'no results parsed', hint: 'Try a simpler query or a known URL.' }
-  if (payload.ok) searchCache.set(cacheKey, { payload, fetchedAt: Date.now() })
-  return webJson(payload)
 }
 
 // fetch_url: open a known URL, extract readable text, and return structured JSON.
@@ -1237,50 +1476,48 @@ async function execFetchUrl(args, context = {}) {
   }
 
   console.log(`[fetch_url] -> ${url}`)
-  let res
-  const merged = createMergedAbortSignal(context.signal, 12000)
-  try {
-    res = await fetch(url, { headers: WEB_HEADERS, signal: merged?.signal })
-  } catch (err) {
-    merged?.cleanup()
-    if (err.name === 'AbortError') throw err
-    console.log(`[fetch_url] failed: ${url} - ${err.message}`)
-    return webJson({ ok: false, tool: 'fetch_url', url, error: err.message, hint: 'Network request failed. Use web_search to find an alternate source.' })
-  }
-  merged?.cleanup()
 
-  if (!res.ok) {
-    return webJson({ ok: false, tool: 'fetch_url', url, status: res.status, error: `HTTP ${res.status}`, hint: 'This page could not be read. Use web_search to find another accessible source; do not treat this as page content.' })
+  // 策略一：Jina Reader（处理 JS 页面、Cloudflare 防护、内容提取质量最好）
+  throwIfAborted(context.signal)
+  let title = ''
+  let text = ''
+  let fetchSource = 'jina'
+  let httpStatus = null
+
+  const jinaResult = await fetchViaJina(url, context.signal)
+  if (jinaResult) {
+    title = jinaResult.title
+    text = jinaResult.body
+  } else {
+    // 策略二：直接 HTTP（静态页面兜底）
+    console.log(`[fetch_url] jina failed, trying direct: ${url}`)
+    fetchSource = 'direct'
+    const directResult = await fetchViaDirect(url, context.signal)
+    httpStatus = directResult.status
+
+    if (!directResult.ok) {
+      const hint = directResult.low_value
+        ? 'The page requires JavaScript or blocks crawlers. Use browser_read instead.'
+        : 'This page could not be read. Use web_search to find another accessible source.'
+      return webJson({
+        ok: false, tool: 'fetch_url', url,
+        status: directResult.status,
+        content_type: directResult.content_type,
+        error: directResult.error || (directResult.low_value ? 'no readable content' : `HTTP ${directResult.status}`),
+        hint,
+      })
+    }
+    title = directResult.title || ''
+    text = directResult.body || ''
   }
 
-  const contentType = res.headers.get('content-type') || ''
-  if (contentType && !/text|html|xml|json/i.test(contentType)) {
-    return webJson({ ok: false, tool: 'fetch_url', url, status: res.status, content_type: contentType, error: 'unsupported content type', hint: 'Use a text/html source for reading.' })
-  }
-
-  const html = await res.text()
-  const text = htmlToText(html)
-  const title = extractTitle(html)
-  if (isLowValuePageText(text)) {
-    return webJson({
-      ok: false,
-      tool: 'fetch_url',
-      url,
-      status: res.status,
-      title,
-      error: 'no readable content extracted',
-      content_preview: text.slice(0, 300),
-      content_length: text.length,
-      hint: 'The page opened, but readable article text was not extracted. It may require JavaScript rendering, block crawlers, or be an empty/verification page. Use web_search to find another accessible source.',
-    })
-  }
   const MAX = 5000
   const isLong = text.length >= ARTICLE_LENGTH_THRESHOLD
   let bodyPath = null
   let bodyBytes = null
   if (isLong) {
     try {
-      const saved = saveLongArticle({ url, finalUrl: url, title, body: text, source: 'fetch_url' })
+      const saved = saveLongArticle({ url, finalUrl: url, title, body: text, source: fetchSource })
       bodyPath = saved.path
       bodyBytes = saved.bytes
     } catch (err) {
@@ -1294,7 +1531,8 @@ async function execFetchUrl(args, context = {}) {
     ok: true,
     tool: 'fetch_url',
     url,
-    status: res.status,
+    status: httpStatus,
+    fetch_source: fetchSource,
     title,
     content,
     truncated: isLong || text.length > MAX,
@@ -1319,36 +1557,39 @@ async function execBrowserRead(args, context = {}) {
   const maxChars = Math.max(1000, Math.min(Number(args.max_chars || args.maxChars || 8000), 12000))
   console.log(`[browser_read] -> ${url}`)
 
-  let browser
-  let page
+  let browserContext = null
+  let page = null
   try {
-    browser = await launchReadableBrowser()
-    const contextOptions = {
+    // 复用单例浏览器，避免每次冷启动 Chromium（约 3~5 秒）
+    const browser = await getSharedBrowser()
+    browserContext = await browser.newContext({
       viewport: BROWSER_VIEWPORT,
       locale: 'zh-CN',
       userAgent: WEB_HEADERS['User-Agent'],
-    }
-    const browserContext = await browser.newContext(contextOptions)
+    })
     page = await browserContext.newPage()
     page.setDefaultTimeout(timeoutMs)
     page.setDefaultNavigationTimeout(timeoutMs)
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
-    await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 12000) }).catch(() => {})
+    // networkidle 可能挂死，限制等待时间
+    await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 8000) }).catch(() => {})
     await autoScrollPage(page, context.signal)
 
     const title = (await page.title()).trim()
     const text = await page.evaluate(() => {
-      const selectors = ['script', 'style', 'noscript', 'svg', 'canvas', 'iframe']
-      selectors.forEach(selector => document.querySelectorAll(selector).forEach(el => el.remove()))
-      const candidates = [...document.querySelectorAll('article, main, [role="main"], .article, .post, .content')]
+      ;['script', 'style', 'noscript', 'svg', 'canvas', 'iframe', 'header', 'footer', 'nav'].forEach(
+        tag => document.querySelectorAll(tag).forEach(el => el.remove())
+      )
+      // 优先取语义容器，取文本最长的那个
+      const candidates = [
+        ...document.querySelectorAll('article, main, [role="main"], .article, .post, .content, .entry-content, #content, #main'),
+      ]
       const best = candidates
         .map(el => ({ el, text: (el.innerText || '').trim() }))
         .sort((a, b) => b.text.length - a.text.length)[0]
-      return (best?.text && best.text.length > 200 ? best.text : document.body?.innerText || '').trim()
+      return (best?.text && best.text.length > 300 ? best.text : document.body?.innerText || '').trim()
     })
     const finalUrl = page.url()
-    await browser.close()
-    browser = null
 
     if (isLowValuePageText(text)) {
       return webJson({
@@ -1396,6 +1637,8 @@ async function execBrowserRead(args, context = {}) {
     })
   } catch (err) {
     if (err.name === 'AbortError') throw err
+    // 浏览器崩溃或断开时，清掉单例让下次重建
+    invalidateSharedBrowser()
     return webJson({
       ok: false,
       tool: 'browser_read',
@@ -1404,8 +1647,9 @@ async function execBrowserRead(args, context = {}) {
       hint: 'Browser rendering failed. Try fetch_url or another accessible source.',
     })
   } finally {
+    // 关 context（含页面），不关 browser（单例复用）
     try { await page?.close() } catch {}
-    try { await browser?.close() } catch {}
+    try { await browserContext?.close() } catch {}
   }
 }
 
@@ -1508,21 +1752,9 @@ async function execSpeak(args) {
 
 // 语音消息自动回复 TTS：检测到用户用语音输入时，通知前端播放语音
 // 由 index.js 调用，前端收到 tts_reply 事件后调用 /tts/stream 完成实际合成
-// 对话型内容上限（流畅散文，天气/时间/短回答等）
-const TTS_PROSE_LIMIT = 150
-// 列表型内容判定：换行数 ÷ 总字数 超过此比例视为列表
-const TTS_LIST_DENSITY = 0.05
-
 export function autoSpeakForVoiceReply(text) {
   if (!text) return
-  const raw = text.trim()
-  if (!raw) return
-
-  // 判断是否列表型（多行条目：热点、搜索结果等）
-  const lineBreaks = (raw.match(/\n/g) || []).length
-  const isList = lineBreaks >= 3 && lineBreaks / raw.length > TTS_LIST_DENSITY
-
-  const plain = raw
+  const plain = text.trim()
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/\*(.+?)\*/g, '$1')
     .replace(/`(.+?)`/g, '$1')
@@ -1532,19 +1764,7 @@ export function autoSpeakForVoiceReply(text) {
     .replace(/\n+/g, ' ')
     .trim()
   if (!plain) return
-
-  let spoken
-  if (!isList && plain.length <= TTS_PROSE_LIMIT) {
-    // 对话型且不超限：完整播放
-    spoken = plain
-  } else {
-    // 列表型或超长：只播第一句 + 提示
-    const sentenceEnd = plain.search(/[。！？!?]/)
-    const firstSentence = sentenceEnd > 0 ? plain.slice(0, sentenceEnd + 1) : plain.slice(0, 60)
-    spoken = firstSentence.trim()
-  }
-
-  emitEvent('tts_reply', { text: spoken })
+  emitEvent('tts_reply', { text: plain })
 }
 
 // generate_lyrics：生成歌词
@@ -1708,6 +1928,37 @@ function execHotspotMode(args = {}) {
   return JSON.stringify({ ok: true, tool: 'hotspot_mode', state })
 }
 
+function execOpenDocPanel(args = {}) {
+  const action = String(args.action || 'open').trim().toLowerCase()
+  const nextActive = action !== 'close'
+  const validTopics = ['voice_asr', 'voice_tts', 'voice_config']
+
+  // 打开时 topic 必填；关闭时 topic 可省略（沿用当前面板已有的 topicId）
+  let topic = args.topic ? String(args.topic).trim() : null
+  if (nextActive && topic && !validTopics.includes(topic)) {
+    if (/asr|识别|麦克风/.test(topic)) topic = 'voice_asr'
+    else if (/tts|合成|声音/.test(topic)) topic = 'voice_tts'
+    else topic = 'voice_config'
+  }
+
+  const state = setDocPanelState({ active: nextActive, topicId: topic, source: 'agent_tool' })
+
+  const effectiveTopic = topic || state.topicId
+  emitEvent('doc_panel_mode', {
+    action: nextActive ? 'open' : 'close',
+    active: nextActive,
+    topic: effectiveTopic,
+    reason: typeof args.reason === 'string' ? args.reason : '',
+  })
+  emitEvent('action', {
+    tool: 'open_doc_panel',
+    summary: nextActive ? `打开文档面板（${effectiveTopic}）` : '关闭文档面板',
+    detail: args.reason || '',
+  })
+
+  return JSON.stringify({ ok: true, tool: 'open_doc_panel', topic: effectiveTopic, state })
+}
+
 function execPersonCardMode(args = {}) {
   const action = String(args.action || 'status').trim().toLowerCase()
   if (!['show', 'open', 'hide', 'close', 'update', 'toggle', 'status'].includes(action)) {
@@ -1763,19 +2014,35 @@ function execPersonCardMode(args = {}) {
 const MUSIC_AUDIO_EXTS = new Set(['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.opus'])
 
 async function fetchLrcFromNet(title, artist) {
+  const headers = { 'User-Agent': 'BaiLongma/1.0' }
+  // 策略1：精确匹配（title + artist）
   try {
     const params = new URLSearchParams({ track_name: title })
     if (artist) params.set('artist_name', artist)
     const res = await fetch(`https://lrclib.net/api/get?${params}`, {
-      signal: AbortSignal.timeout(8000),
-      headers: { 'User-Agent': 'BaiLongma/1.0' },
+      signal: AbortSignal.timeout(8000), headers,
     })
-    if (!res.ok) return null
-    const data = await res.json()
-    return data.syncedLyrics || data.plainLyrics || null
-  } catch {
-    return null
-  }
+    if (res.ok) {
+      const data = await res.json()
+      const lrc = data.syncedLyrics || data.plainLyrics || null
+      if (lrc) return lrc
+    }
+  } catch {}
+  // 策略2：仅 title 关键词搜索，取第一条结果
+  try {
+    const params = new URLSearchParams({ q: title })
+    const res = await fetch(`https://lrclib.net/api/search?${params}`, {
+      signal: AbortSignal.timeout(8000), headers,
+    })
+    if (res.ok) {
+      const list = await res.json()
+      if (Array.isArray(list) && list.length > 0) {
+        const hit = list[0]
+        return hit.syncedLyrics || hit.plainLyrics || null
+      }
+    }
+  } catch {}
+  return null
 }
 
 function runCommand(cmd, cwd) {
@@ -1875,8 +2142,13 @@ async function execMusic(args = {}) {
 
     // Download: print final filepath after conversion
     const outTemplate = path.join(musicDir, '%(title)s.%(ext)s').replace(/\\/g, '/')
-    const dlCmd = `${ytdlp} -x --audio-format mp3 --audio-quality 192K --no-playlist --print after_move:filepath -o "${outTemplate}" "${url}"`
-    const result = await runCommand(dlCmd)
+    const dlBase = `${ytdlp} -x --audio-format mp3 --audio-quality 192K --no-playlist --print after_move:filepath -o "${outTemplate}"`
+    let result = await runCommand(`${dlBase} "${url}"`)
+
+    // SSL 握手失败时降级：加 --no-check-certificates 重试一次
+    if (result.code !== 0 && /ssl|EOF occurred in violation of protocol/i.test(result.stderr)) {
+      result = await runCommand(`${dlBase} --no-check-certificates "${url}"`)
+    }
 
     if (result.code !== 0) {
       return JSON.stringify({ ok: false, error: `yt-dlp failed: ${result.stderr.slice(0, 400)}` })
@@ -1928,7 +2200,7 @@ async function execMusic(args = {}) {
     if (!title) return JSON.stringify({ ok: false, error: 'title required' })
 
     const lrc = await fetchLrcFromNet(title, artist)
-    if (!lrc) return JSON.stringify({ ok: false, error: `lyrics not found for "${title}" on lrclib.net` })
+    if (!lrc) return JSON.stringify({ ok: true, id: id || null, title, artist, lrc: null, hint: 'lyrics not found on lrclib.net' })
 
     if (id) updateMusicLrc(id, lrc)
     return JSON.stringify({ ok: true, id: id || null, title, artist, lrc_length: lrc.length, lrc })
@@ -2291,14 +2563,14 @@ function execUIRegister({ component_name, code, props_schema, use_case, example_
   invalidateACUIComponentsCache()
 
   // seed skill.ui 记忆
-  const skillContent = `[技能·UI] ${component_name}\n适用场景：${use_case}\n调用示例：${example_call}`
+  const skillContent = `[Skill UI] ${component_name}\nUse case: ${use_case}\nExample call: ${example_call}`
   try {
     insertMemory({
       mem_id: `skill-ui-${kebab}`,
       type: 'skill',
       content: skillContent,
       detail: skillContent,
-      title: `UI 组件：${component_name}`,
+      title: `UI component: ${component_name}`,
       tags: ['skill.ui', `component:${component_name}`],
       entities: [],
       timestamp: new Date().toISOString(),
@@ -2369,6 +2641,46 @@ function execSetLocation({ city }) {
   if (!loc) return toolJson({ ok: false, error: '城市名称不能为空' })
   setUserLocation(loc)
   return toolJson({ ok: true, city: loc, message: `位置已更新为：${loc}` })
+}
+
+function normalizeSelfCheckResults(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const normalized = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      normalized[key] = { status: String(item || 'unknown') }
+      continue
+    }
+    normalized[key] = {
+      status: String(item.status || item.state || 'unknown').slice(0, 40),
+      detail: String(item.detail || item.message || '').slice(0, 500),
+    }
+  }
+  return normalized
+}
+
+function execCompleteStartupSelfCheck({ summary = '', results = {} } = {}, context = {}) {
+  if (!context?.startupSelfCheck?.active || !context?.onCompleteStartupSelfCheck) {
+    return toolJson({
+      ok: false,
+      tool: 'complete_startup_self_check',
+      error: 'startup self-check is not active',
+    })
+  }
+
+  const cleanResults = normalizeSelfCheckResults(results)
+  const completed = context.onCompleteStartupSelfCheck({
+    summary: String(summary || '').slice(0, 1000),
+    results: cleanResults,
+  })
+  return toolJson({
+    ok: true,
+    tool: 'complete_startup_self_check',
+    version: completed.version,
+    status: completed.status,
+    completed_at: completed.completed_at,
+    results: cleanResults,
+  })
 }
 
 async function execRecallMemory({ query }, context) {
