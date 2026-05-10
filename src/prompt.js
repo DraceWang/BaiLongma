@@ -1,5 +1,28 @@
 import { nowTimestamp } from './time.js'
 
+// 根据 personMemory 的丰富程度计算好奇心等级
+// 返回 'high' | 'medium' | 'low' | 'none'
+function computeCuriosity(personMemory) {
+  if (!personMemory) return 'high'
+  const text = ((personMemory.content || '') + ' ' + (personMemory.detail || '')).trim()
+  if (text.length < 80) return 'high'
+  if (text.length < 220) return 'medium'
+  if (text.length < 400) return 'low'
+  return 'none'
+}
+
+const CURIOSITY_PROMPTS = {
+  high: `## Curiosity State
+你对当前对话者了解很少，自然地对他们感到好奇。先回应对方说的内容，再在结尾带出你最想知道的那一个问题。一次问太多会让人难以回答，通常一个问题就够了。`,
+
+  medium: `## Curiosity State
+你对当前对话者有一些了解，偶尔还想多知道一点。在对话节奏自然时顺势问一个细节，不要强行插入。一次一个问题通常比一次问很多更让人愿意回答。`,
+
+  low: `## Curiosity State
+你对当前对话者已经有了一定了解。如果某个细节让你真的好奇，顺口问一下就好，不必刻意挖掘。`,
+}
+
+
 export function buildSystemPrompt({
   agentName = 'Longma',
   persona = '',
@@ -255,6 +278,11 @@ function buildDynamicSection({
   if (personMemory) {
     const relatedEntity = JSON.parse(personMemory.entities || '[]')[0] || 'the other party'
     parts.push(`## About ${relatedEntity}\n${personMemory.content}\n${personMemory.detail || ''}`.trim())
+  }
+
+  const curiosityLevel = computeCuriosity(personMemory)
+  if (CURIOSITY_PROMPTS[curiosityLevel]) {
+    parts.push(CURIOSITY_PROMPTS[curiosityLevel])
   }
 
   if (thoughtStack?.length > 0) {

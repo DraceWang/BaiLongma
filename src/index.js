@@ -9,7 +9,7 @@ import { calculateNextDueAt, autoSpeakForVoiceReply } from './capabilities/execu
 import { popMessage, hasMessages, hasUserMessages, getQueueSnapshot, setInterruptCallback, requeueMessage, pushMessage } from './queue.js'
 import { startTUI } from './tui.js'
 import { startAPI } from './api.js'
-import { emitEvent, emitUICommand, addActiveUICard, hasACUIClient } from './events.js'
+import { emitEvent, emitUICommand, addActiveUICard, hasACUIClient, setStickyEvent, clearStickyEvent } from './events.js'
 import { formatTick, nowTimestamp, describeExistence } from './time.js'
 import { getAdaptiveTickInterval, getQuotaStatus, setRateLimited, isRateLimited, getTickInterval } from './quota.js'
 import { registerProvider } from './providers/registry.js'
@@ -310,6 +310,7 @@ function buildToolContextForProcess(msg, injection) {
         entities: [],
         timestamp: now,
       })
+      clearStickyEvent('startup_self_check_started')
       emitEvent('startup_self_check_completed', completed)
       return completed
     },
@@ -569,23 +570,28 @@ async function process(input, label, msg = null) {
 
     const directions = [...(injection.directions || [])]
     if (isTick) {
-      directions.unshift(
-        `当前是 L2 自主心跳轮次，没有新的用户消息。你拥有完整工具权限，可以主动行动——不需要等用户发起。\n` +
-        `你可以主动做的事（示例，不限于此）：\n` +
-        `- 根据时间段（早晨/晚上/深夜）主动问候或关心用户\n` +
-        `- 查看 sandbox 文件夹，检查进行中的项目或文件变化，必要时汇报\n` +
-        `- 搜索记忆库，找出有未完成承诺、待跟进事项或到期提醒，主动推进\n` +
-        `- 发现近期对话里有值得延伸的话题，主动分享一个想法或信息\n` +
-        `- 网络搜索用户感兴趣的内容，把有价值的发现推送给用户\n` +
-        `- 检查任务进度或 prefetch 数据（天气/新闻），有变化时主动告知\n` +
-        `行动准则：\n` +
-        `- 主动但不骚扰：不重复说刚说过的话，不在深夜无故打扰（23:00–06:00 只在有明确价值时才发消息）\n` +
-        `- 有实质内容：发消息前确保有真正值得说的东西，不要只是"打个招呼"\n` +
-        `- 不需要全部都做：每轮选一件最有价值的事做，做完即可，不要在单轮里堆砌多个行动\n` +
-        `- 如果确实没有值得做的事，可以静默，不调用任何工具`
-      )
       const startupSelfCheckDirections = buildStartupSelfCheckDirections(state.startupSelfCheck)
-      if (startupSelfCheckDirections) directions.unshift(startupSelfCheckDirections)
+      if (startupSelfCheckDirections) {
+        // 自检激活时，仅注入自检指令，不注入通用 tick 方向
+        // 避免"可以静默"选项与"必须执行自检"产生冲突
+        directions.unshift(startupSelfCheckDirections)
+      } else {
+        directions.unshift(
+          `当前是 L2 自主心跳轮次，没有新的用户消息。你拥有完整工具权限，可以主动行动——不需要等用户发起。\n` +
+          `你可以主动做的事（示例，不限于此）：\n` +
+          `- 根据时间段（早晨/晚上/深夜）主动问候或关心用户\n` +
+          `- 查看 sandbox 文件夹，检查进行中的项目或文件变化，必要时汇报\n` +
+          `- 搜索记忆库，找出有未完成承诺、待跟进事项或到期提醒，主动推进\n` +
+          `- 发现近期对话里有值得延伸的话题，主动分享一个想法或信息\n` +
+          `- 网络搜索用户感兴趣的内容，把有价值的发现推送给用户\n` +
+          `- 检查任务进度或 prefetch 数据（天气/新闻），有变化时主动告知\n` +
+          `行动准则：\n` +
+          `- 主动但不骚扰：不重复说刚说过的话，不在深夜无故打扰（23:00–06:00 只在有明确价值时才发消息）\n` +
+          `- 有实质内容：发消息前确保有真正值得说的东西，不要只是"打个招呼"\n` +
+          `- 不需要全部都做：每轮选一件最有价值的事做，做完即可，不要在单轮里堆砌多个行动\n` +
+          `- 如果确实没有值得做的事，可以静默，不调用任何工具`
+        )
+      }
     }
     if (fastUserPath) {
       directions.unshift('Current turn is a real-time external user message. Understand it quickly and reply directly with send_message before doing slow tools or deep context gathering. Use heavier tools only when the reply depends on them. During execution, whenever there is meaningful progress or a useful finding, send_message to keep the user in the loop. Do not ask for permission for actions you can safely perform; act, and speak when there is something worth saying.')
@@ -1087,6 +1093,15 @@ async function startConsciousnessLoop({ runImmediateTick = true } = {}) {
     }
     triggerImmediateTick()
   })
+
+  // 在首次 tick 之前初始化自检状态，确保首轮 tick 就能执行自检
+  ensureStartupSelfCheckState()
+  if (state.startupSelfCheck?.active) {
+    console.log('[系统] 启动自检开始')
+    const selfCheckPayload = { version: STARTUP_SELF_CHECK_VERSION }
+    setStickyEvent('startup_self_check_started', selfCheckPayload)
+    emitEvent('startup_self_check_started', selfCheckPayload)
+  }
 
   // 是否立即打一发 L2 TICK 由调用方决定；首次激活会用它触发启动自检。
   if (runImmediateTick) {

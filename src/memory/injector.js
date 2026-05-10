@@ -221,7 +221,7 @@ export async function runInjector({ message, state, hint = '' }) {
   if (mmCaps.includes('image'))  baseTools.push('generate_image')
   const isTick = !senderId && /^TICK\s/i.test(message?.trim())
   if (senderId || state?.prev_recall || isTick) baseTools.push('search_memory')
-  if (isTick && state?.startupSelfCheck?.active) baseTools.push('complete_startup_self_check')
+  if (state?.startupSelfCheck?.active) baseTools.push('complete_startup_self_check')
   const tools = [...new Set(baseTools)]
 
   const actionLog = getRecentActionLogs(10)

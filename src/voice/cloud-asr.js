@@ -12,9 +12,15 @@ import { WebSocket } from 'ws'
 // ─── 阿里云 Paraformer ───
 // 协议：run-task → PCM binary chunks → finish-task
 // 结果：{header:{event:"result-generated"}, payload:{output:{sentence:{text,status}}}}
+// 连接建立前的待发音频上限（~4s，防止连接失败时无限堆积）
+const MAX_PENDING_CHUNKS = 16
+
 function createAliyunSession(apiKey, lang, onTranscript, onError, onClose) {
   const WS_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference/'
   const taskId = crypto.randomUUID()
+
+  let ready = false
+  const pending = []
 
   const ws = new WebSocket(WS_URL, {
     headers: { Authorization: `bearer ${apiKey}` },
@@ -29,10 +35,21 @@ function createAliyunSession(apiKey, lang, onTranscript, onError, onClose) {
         task: 'asr',
         function: 'recognition',
         model: 'paraformer-realtime-v2',
-        parameters: { sample_rate: 16000, format: 'pcm', language_hints: [langCode] },
+        parameters: {
+            sample_rate: 16000,
+            format: 'pcm',
+            language_hints: [langCode],
+            punctuation_prediction: true,
+            inverse_text_normalization: true,
+          },
         input: {},
       },
     }))
+    ready = true
+    for (const buf of pending) {
+      try { ws.send(buf) } catch {}
+    }
+    pending.length = 0
   })
 
   ws.on('message', (data) => {
@@ -42,8 +59,7 @@ function createAliyunSession(apiKey, lang, onTranscript, onError, onClose) {
       if (event === 'result-generated') {
         const sentence = msg?.payload?.output?.sentence
         if (sentence?.text) {
-          // end_time > 0 表示句子已结束（最终结果）；status 字段作为备选判断
-          const isFinal = sentence.end_time > 0 || sentence.status === 'sentence_end'
+          const isFinal = sentence.status === 'sentence_end'
           onTranscript(sentence.text, isFinal)
         }
       } else if (event === 'task-failed') {
@@ -52,11 +68,15 @@ function createAliyunSession(apiKey, lang, onTranscript, onError, onClose) {
     } catch {}
   })
 
-  ws.on('error', (err) => onError(err.message))
-  ws.on('close', onClose)
+  ws.on('error', (err) => { pending.length = 0; onError(err.message) })
+  ws.on('close', () => { pending.length = 0; onClose() })
 
   return {
     sendAudio(pcmBuffer) {
+      if (!ready) {
+        if (pending.length < MAX_PENDING_CHUNKS) pending.push(pcmBuffer)
+        return
+      }
       if (ws.readyState === WebSocket.OPEN) ws.send(pcmBuffer)
     },
     flush() {
@@ -98,6 +118,17 @@ function createTencentSession(secretId, secretKey, appId, lang, onTranscript, on
   const url = `wss://${host}${path}?${sortedQuery}&signature=${encodeURIComponent(signature)}`
   const ws = new WebSocket(url)
 
+  let ready = false
+  const pending = []
+
+  ws.on('open', () => {
+    ready = true
+    for (const buf of pending) {
+      try { ws.send(buf) } catch {}
+    }
+    pending.length = 0
+  })
+
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString())
@@ -110,11 +141,15 @@ function createTencentSession(secretId, secretKey, appId, lang, onTranscript, on
     } catch {}
   })
 
-  ws.on('error', (err) => onError(err.message))
-  ws.on('close', onClose)
+  ws.on('error', (err) => { pending.length = 0; onError(err.message) })
+  ws.on('close', () => { pending.length = 0; onClose() })
 
   return {
     sendAudio(pcmBuffer) {
+      if (!ready) {
+        if (pending.length < MAX_PENDING_CHUNKS) pending.push(pcmBuffer)
+        return
+      }
       if (ws.readyState === WebSocket.OPEN) ws.send(pcmBuffer)
     },
     flush() {
@@ -137,6 +172,17 @@ function createXunfeiSession(appId, apiKey, lang, onTranscript, onError, onClose
   const url = `wss://rtasr.xfyun.cn/v1/ws?appid=${appId}&ts=${ts}&signa=${encodeURIComponent(signa)}&lang=${langParam}`
   const ws = new WebSocket(url)
 
+  let ready = false
+  const pending = []
+
+  ws.on('open', () => {
+    ready = true
+    for (const buf of pending) {
+      try { ws.send(buf) } catch {}
+    }
+    pending.length = 0
+  })
+
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString())
@@ -152,11 +198,15 @@ function createXunfeiSession(appId, apiKey, lang, onTranscript, onError, onClose
     } catch {}
   })
 
-  ws.on('error', (err) => onError(err.message))
-  ws.on('close', onClose)
+  ws.on('error', (err) => { pending.length = 0; onError(err.message) })
+  ws.on('close', () => { pending.length = 0; onClose() })
 
   return {
     sendAudio(pcmBuffer) {
+      if (!ready) {
+        if (pending.length < MAX_PENDING_CHUNKS) pending.push(pcmBuffer)
+        return
+      }
       if (ws.readyState === WebSocket.OPEN) ws.send(pcmBuffer)
     },
     flush() {

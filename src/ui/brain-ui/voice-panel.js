@@ -51,6 +51,9 @@ const STATE_CFG = {
 const BARGEIN_WARMUP_MS  = 600  // TTS 开始后前 600ms 不检测（等 AEC 适应）
 const BARGEIN_FRAMES     = 8    // 需要连续 8 帧高振幅（约 130ms）才触发
 const BARGEIN_THRESHOLD  = 0.09 // 振幅阈值（高于环境噪声和 AEC 残留）
+// 4096 samples @ 16kHz = 256ms/块；保留 1500ms ≈ 6 块
+const BARGEIN_PRE_BUFFER_MS   = 1500
+const BARGEIN_MAX_CHUNKS      = Math.ceil(BARGEIN_PRE_BUFFER_MS * 16000 / 1000 / 4096)
 
 // ─── 声音事件图标映射 ───
 const SOUND_EVENT_ICONS = {
@@ -238,6 +241,12 @@ export function initVoicePanel({
   let cloudAudioCtx = null;
   let cloudProcessor = null;
   let cloudWs = null;
+  // 打断预缓冲：TTS 期间把 PCM 写入环形缓冲，打断后一并发给 ASR
+  let bargeinBuffer = []  // Int16Array 块的环形队列
+  let bargeinBuffering = false // true = 正在 TTS，写缓冲而非发 WS
+  // 自动发送防抖
+  let lastTranscriptText = '';
+  let autoSendTimer = null;
 
   async function startMic() {
     try {
@@ -273,8 +282,20 @@ export function initVoicePanel({
 
   // ─── 语音识别结果发送 ───
   function sendRecognizedVoiceText() {
-    const sent = getSendMessage?.({ channel: '语音识别', label: 'You · 语音识别' });
-    if (!sent) getSendBtn?.()?.click();
+    if (!lastTranscriptText) return;
+    const input = getChatInput?.();
+    if (input) input.value = lastTranscriptText;
+    getSendMessage?.({ channel: '语音识别', label: 'You · 语音识别' });
+  }
+
+  // 防抖自动发送：收到任意转录文字就重置 2s 计时器，停说 2s 后自动发
+  function scheduleAutoSend() {
+    if (autoSendTimer) clearTimeout(autoSendTimer);
+    autoSendTimer = setTimeout(() => {
+      autoSendTimer = null;
+      setStatus('processing');
+      sendRecognizedVoiceText();
+    }, 2000);
   }
 
   // ─── Cloud ASR 模式（后端代理） ───
@@ -305,16 +326,14 @@ export function initVoicePanel({
         if (msg.type === 'transcript') {
           const text = (msg.text || '').trim();
           if (!text) return;
+          lastTranscriptText = text;
           if (transcript) transcript.textContent = text;
           if (msg.is_final) {
             const input = getChatInput?.();
             if (input) input.value = text;
             triggerDone();
-            if (getAutoSend?.()) {
-              setStatus('processing');
-              setTimeout(sendRecognizedVoiceText, 100);
-            }
           }
+          scheduleAutoSend();
         } else if (msg.type === 'error') {
           setStatus('error');
           if (transcript) transcript.textContent = msg.message || '云端识别错误';
@@ -333,17 +352,23 @@ export function initVoicePanel({
     cloudProcessor.connect(audioCtx.destination);
 
     cloudProcessor.onaudioprocess = (e) => {
-      if (!cloudWs || cloudWs.readyState !== WebSocket.OPEN) return;
       const f32 = e.inputBuffer.getChannelData(0);
       const i16 = new Int16Array(f32.length);
       for (let i = 0; i < f32.length; i++) {
         i16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32768));
       }
+      if (bargeinBuffering) {
+        // TTS 播放中：写入环形缓冲而非发送，供打断时回放
+        bargeinBuffer.push(i16);
+        if (bargeinBuffer.length > BARGEIN_MAX_CHUNKS) bargeinBuffer.shift();
+        return;
+      }
+      if (!cloudWs || cloudWs.readyState !== WebSocket.OPEN) return;
       cloudWs.send(i16.buffer);
     };
   }
 
-  function stopCloudStream() {
+  function stopCloudStream({ preserveProcessor = false } = {}) {
     try {
       if (cloudWs && cloudWs.readyState === WebSocket.OPEN) {
         cloudWs.send(JSON.stringify({ type: 'flush' }));
@@ -354,10 +379,11 @@ export function initVoicePanel({
     } catch {}
     cloudWs = null;
 
-    try { cloudProcessor?.disconnect(); } catch {}
-    cloudProcessor = null;
-
-    try { if (cloudAudioCtx) { cloudAudioCtx.close(); cloudAudioCtx = null; } } catch {}
+    if (!preserveProcessor) {
+      try { cloudProcessor?.disconnect(); } catch {}
+      cloudProcessor = null;
+      try { if (cloudAudioCtx) { cloudAudioCtx.close(); cloudAudioCtx = null; } } catch {}
+    }
   }
 
   // ─── 统一开关 ───
@@ -377,9 +403,13 @@ export function initVoicePanel({
 
   function stopVoiceInput({ keepIntent = false, reason = '' } = {}) {
     if (doneTimer) { clearTimeout(doneTimer); doneTimer = null; }
+    if (autoSendTimer) { clearTimeout(autoSendTimer); autoSendTimer = null; }
+    lastTranscriptText = '';
     micActive = false;
     if (!keepIntent) userWantedMic = false;
     btn?.classList.toggle('active', Boolean(keepIntent && userWantedMic));
+    bargeinBuffer = [];
+    bargeinBuffering = false;
     stopCloudStream();
     stopMic();
     setStatus('idle');
@@ -390,12 +420,51 @@ export function initVoicePanel({
     if (!suspendedByMedia || !userWantedMic) return;
     suspendedByMedia = false;
     bargeinFrames = 0;
-    if (micActive && micData) {
-      // TTS 模式：mic 硬件一直开着，只需重连云端 ASR
+
+    // 拿走缓冲区快照并立刻停止写入，避免 WS 重连期间继续堆积
+    const bufferedChunks = bargeinBuffer.slice();
+    bargeinBuffer = [];
+    bargeinBuffering = false;
+
+    if (micActive && micData && cloudProcessor) {
+      // TTS 模式：ScriptProcessor 仍存活，只需重连 WebSocket
       setStatus('listening');
-      startCloudStream(micData.stream);
+      cloudWs = new WebSocket(CLOUD_WS_URL);
+      cloudWs.binaryType = 'arraybuffer';
+      cloudWs.onopen = () => {
+        const provider = localStorage.getItem(VOICE_PROVIDER_KEY) || 'aliyun';
+        const lang = getLang?.()?.split('-')[0] || 'zh';
+        cloudWs.send(JSON.stringify({ type: 'config', provider, lang }));
+        if (transcript) transcript.textContent = '';
+        // 先把预缓冲的历史音频一次性发出，补回打断前说的内容
+        for (const chunk of bufferedChunks) {
+          if (cloudWs.readyState === WebSocket.OPEN) cloudWs.send(chunk.buffer);
+        }
+      };
+      cloudWs.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'transcript') {
+            const text = (msg.text || '').trim();
+            if (!text) return;
+            lastTranscriptText = text;
+            if (transcript) transcript.textContent = text;
+            if (msg.is_final) {
+              const input = getChatInput?.();
+              if (input) input.value = text;
+              triggerDone();
+            }
+            scheduleAutoSend();
+          } else if (msg.type === 'error') {
+            setStatus('error');
+            if (transcript) transcript.textContent = msg.message || '云端识别错误';
+          }
+        } catch {}
+      };
+      cloudWs.onerror = () => { setStatus('error'); };
+      cloudWs.onclose = () => { if (micActive) setStatus('idle'); };
     } else {
-      // 视频/音乐模式：mic 已完全停止，重新启动
+      // 视频/音乐模式，或 Processor 已被销毁：完整重启
       micActive = true;
       btn?.classList.add('active');
       const stream = await startMic();
@@ -417,13 +486,16 @@ export function initVoicePanel({
       suspendedByMedia = true;
       stopVoiceInput({ keepIntent: true, reason: '视频模式中，语音已暂停' });
     },
-    // TTS 模式：只停云端 ASR，保持 mic 硬件开着以便打断检测
+    // TTS 模式：只停云端 ASR WebSocket，保持 mic 硬件 + ScriptProcessor
+    // 开启预缓冲：打断时可回放最近 1.5s 的音频，避免开头几个字丢失
     suspendForTTS: () => {
       if (!micActive) return;
       suspendedByMedia = true;
       ttsStartTime = Date.now();
       bargeinFrames = 0;
-      stopCloudStream();
+      bargeinBuffer = [];
+      bargeinBuffering = true;
+      stopCloudStream({ preserveProcessor: true }); // 保留 Processor，只断 WS
       setStatus('speaking');
     },
     resumeAfterMedia: resumeVoiceInputFromMedia,
