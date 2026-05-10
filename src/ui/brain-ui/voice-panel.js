@@ -35,6 +35,7 @@ function lerpArr(a, b, t) { return a.map((v, i) => lerp(v, b[i], t)); }
 // ─── 状态配置 ───
 // idle = 麦克风关闭（灰色）  listening = 麦克风开启待命（白色）
 // recognizing = 正在识别（蓝色）  done = 识别完成（绿色，2s 后回 listening）
+// speaking = AI 正在说话（紫色，可打断）
 const STATE_CFG = {
   idle:        { amp: 0.003, spd: 0.10, r: [50,68,80],    g: [50,68,80],    b: [55,73,85]   },
   listening:   { amp: 0.055, spd: 0.75, r: [185,215,245], g: [185,215,245], b: [195,225,255] },
@@ -43,7 +44,13 @@ const STATE_CFG = {
   processing:  { amp: 0.15,  spd: 1.10, r: [100,60,200],  g: [80,60,180],   b: [220,190,255] },
   error:       { amp: 0.10,  spd: 0.70, r: [200,240,255], g: [20,30,40],    b: [20,30,40]   },
   event:       { amp: 0.60,  spd: 4.00, r: [255,200,50],  g: [200,160,30],  b: [50,80,150]   },
+  speaking:    { amp: 0.09,  spd: 1.00, r: [130,95,185],  g: [105,80,170],  b: [225,200,255] },
 };
+
+// ─── 打断检测参数 ───
+const BARGEIN_WARMUP_MS  = 600  // TTS 开始后前 600ms 不检测（等 AEC 适应）
+const BARGEIN_FRAMES     = 8    // 需要连续 8 帧高振幅（约 130ms）才触发
+const BARGEIN_THRESHOLD  = 0.09 // 振幅阈值（高于环境噪声和 AEC 残留）
 
 // ─── 声音事件图标映射 ───
 const SOUND_EVENT_ICONS = {
@@ -138,11 +145,30 @@ export function initVoicePanel({
       micData.analyser.getByteFrequencyData(micData.dataArray);
       const sum = micData.dataArray.reduce((a, b) => a + b, 0);
       const vol = (sum / micData.dataArray.length) / 255;
+
+      // 打断检测：TTS 播放中持续检测用户声音
+      if (suspendedByMedia) {
+        const aecReady = Date.now() - ttsStartTime > BARGEIN_WARMUP_MS;
+        if (aecReady && vol > BARGEIN_THRESHOLD) {
+          if (++bargeinFrames >= BARGEIN_FRAMES) {
+            bargeinFrames = 0;
+            window.stopTTS?.();
+            resumeVoiceInputFromMedia();
+          }
+        } else {
+          bargeinFrames = 0;
+        }
+      }
+
       if (vol > 0.02) {
         s.amp = lerp(s.amp, 0.08 + vol * 1.2, 0.4);
         s.spd = lerp(s.spd, 1.0 + vol * 5.0, 0.2);
-        if (sk !== 'recognizing' && sk !== 'event') setStatus(vol > 0.15 ? 'recognizing' : 'listening');
-      } else if (sk !== 'idle' && sk !== 'event' && sk !== 'processing' && sk !== 'done') {
+        // speaking 状态下用户开口 → 视觉反馈但不覆盖状态（等 barge-in 触发后自然切换）
+        if (sk !== 'recognizing' && sk !== 'event' && sk !== 'speaking')
+          setStatus(vol > 0.15 ? 'recognizing' : 'listening');
+        else if (sk === 'speaking' && vol > BARGEIN_THRESHOLD)
+          setStatus('recognizing');
+      } else if (sk !== 'idle' && sk !== 'event' && sk !== 'processing' && sk !== 'done' && sk !== 'speaking') {
         setStatus('idle');
       }
     }
@@ -200,6 +226,8 @@ export function initVoicePanel({
   let micActive = false;
   let userWantedMic = false;
   let suspendedByMedia = false;
+  let ttsStartTime = 0;
+  let bargeinFrames = 0;
   let nearFieldGate = {
     noiseFloor: getAmbientThreshold(),
     nearChunks: 0,
@@ -359,26 +387,44 @@ export function initVoicePanel({
   }
 
   async function resumeVoiceInputFromMedia() {
-    if (!suspendedByMedia || !userWantedMic || micActive) return;
+    if (!suspendedByMedia || !userWantedMic) return;
     suspendedByMedia = false;
-    micActive = true;
-    btn?.classList.add('active');
-    const stream = await startMic();
-    if (!stream) {
-      micActive = false;
-      userWantedMic = false;
-      btn?.classList.remove('active');
-      return;
+    bargeinFrames = 0;
+    if (micActive && micData) {
+      // TTS 模式：mic 硬件一直开着，只需重连云端 ASR
+      setStatus('listening');
+      startCloudStream(micData.stream);
+    } else {
+      // 视频/音乐模式：mic 已完全停止，重新启动
+      micActive = true;
+      btn?.classList.add('active');
+      const stream = await startMic();
+      if (!stream) {
+        micActive = false;
+        userWantedMic = false;
+        btn?.classList.remove('active');
+        return;
+      }
+      startCloudStream(stream);
     }
-    startCloudStream(stream);
   }
 
   window.bailongmaVoice = {
     isActive: () => micActive,
+    // 视频/音乐模式：完全停止 mic（不需要打断能力）
     suspendForMedia: () => {
       if (!micActive) return;
       suspendedByMedia = true;
       stopVoiceInput({ keepIntent: true, reason: '视频模式中，语音已暂停' });
+    },
+    // TTS 模式：只停云端 ASR，保持 mic 硬件开着以便打断检测
+    suspendForTTS: () => {
+      if (!micActive) return;
+      suspendedByMedia = true;
+      ttsStartTime = Date.now();
+      bargeinFrames = 0;
+      stopCloudStream();
+      setStatus('speaking');
     },
     resumeAfterMedia: resumeVoiceInputFromMedia,
     stop: () => stopVoiceInput(),

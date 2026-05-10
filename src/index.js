@@ -163,7 +163,7 @@ function buildStartupSelfCheckDirections(checkState) {
     `当前是 L2 启动自检流程（${STARTUP_SELF_CHECK_VERSION}）。这是一次性流程；完成后必须调用 complete_startup_self_check 记录结果，以后不再重复检查。`,
     `自检目标：探索运行环境和关键能力，但不要骚扰用户。除非发现严重问题，否则不要主动 send_message；过程展示在 L2 面板和工具日志即可。`,
     `必须按顺序执行，并且每个 UI 能力都要先打开/展示，确认工具返回，再关闭，然后才能进行下一项：`,
-    `1. 文件环境：list_dir/read_file 是 sandbox 范围内的只读文件工具。用 list_dir 探索 sandbox 根目录及其可见子目录（例如 articles、lyrics、music、downloads、notes 等实际存在的目录），只读探索，不要写文件；如果某个目录不存在，记录 skipped_missing_dir。`,
+    `1. 文件环境：list_dir/read_file 是 sandbox 范围内的只读文件工具。先用 list_dir(".")  列出 sandbox 根目录，然后只对实际出现在结果中的子目录再调用 list_dir；不要猜测或自行构造不存在的路径，若某目录缺失直接记录 skipped_missing_dir 并继续，不要重试。`,
     `2. 上网能力：用 web_search 做一个低风险连通性查询，记录 ok/error。`,
     `3. 热点面板：hotspot_mode show/open，确认返回后 hotspot_mode hide/close。`,
     `4. 音乐能力：先 music scan 或 music list；如果有曲目，用 media_mode mode=music action=show/play 展示播放器，然后 media_mode mode=music action=hide/close；没有曲目则记录 skipped_no_tracks。不要下载音乐。`,

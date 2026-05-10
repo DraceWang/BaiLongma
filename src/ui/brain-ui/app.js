@@ -1256,6 +1256,14 @@ function handle({ type, data = {} }) {
 // ── TTS 语音回复播放 ──────────────────────────────────────────────────────────
 let ttsAudioEl = null;
 
+// 供 voice-panel 打断检测调用：停止当前 TTS 播放（不恢复 ASR，由调用方负责）
+window.stopTTS = () => {
+  if (!ttsAudioEl) return;
+  ttsAudioEl.pause();
+  try { URL.revokeObjectURL(ttsAudioEl.src); } catch {}
+  ttsAudioEl = null;
+};
+
 async function playTTSReply(text) {
   try {
     const resp = await fetch(`${API}/tts/stream`, {
@@ -1272,19 +1280,20 @@ async function playTTSReply(text) {
     const url = URL.createObjectURL(blob);
     if (ttsAudioEl) { ttsAudioEl.pause(); URL.revokeObjectURL(ttsAudioEl.src); }
     ttsAudioEl = new Audio(url);
-    // 播放前暂停语音识别，避免麦克风收到 TTS 音频造成回声
-    window.bailongmaVoice?.suspendForMedia();
+    // 停掉云端 ASR，但保持 mic 硬件开着以便打断检测
+    window.bailongmaVoice?.suspendForTTS?.();
     ttsAudioEl.onended = () => {
       URL.revokeObjectURL(url);
       ttsAudioEl = null;
-      // 播放结束后恢复语音识别
       window.bailongmaVoice?.resumeAfterMedia();
     };
     ttsAudioEl.onerror = () => {
       ttsAudioEl = null;
       window.bailongmaVoice?.resumeAfterMedia();
     };
-    ttsAudioEl.play().catch(() => { window.bailongmaVoice?.resumeAfterMedia(); });
+    ttsAudioEl.play().catch(() => {
+      window.bailongmaVoice?.resumeAfterMedia();
+    });
   } catch {
     window.bailongmaVoice?.resumeAfterMedia();
   }

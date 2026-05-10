@@ -108,13 +108,18 @@ function isPathInside(parentDir, candidatePath) {
 }
 
 function assertInSandbox(resolvedPath) {
-  if (!isPathInside(SANDBOX_ROOT, resolvedPath)) {
+  if (resolvedPath !== SANDBOX_ROOT && !isPathInside(SANDBOX_ROOT, resolvedPath)) {
     throw new Error(`访问被拒绝：文件操作只允许在 sandbox 目录内（${SANDBOX_ROOT}）`)
   }
 }
 
 // 规范化路径：去掉可能带的 sandbox/ 前缀，统一以 SANDBOX_ROOT 为基准
+// 同时处理模型把 list_dir 返回的绝对路径再次传入的情况
 function normalizeSandboxPath(filePath) {
+  if (path.isAbsolute(filePath)) {
+    const rel = path.relative(SANDBOX_ROOT, filePath)
+    if (!rel.startsWith('..')) return rel || '.'
+  }
   return filePath
     .replace(/^sandbox[\\/]/i, '')
     .replace(/^\.[\\/]/, '')
@@ -715,7 +720,8 @@ async function execListDir(args, context = {}) {
     const type = e.isDirectory() ? '[目录]' : '[文件]'
     return `${type} ${e.name}`
   }).join('\n')
-  return `目录：${resolved}\n\n${result}`
+  const relDisplay = dirPath === '.' ? '.' : dirPath.replace(/\\/g, '/')
+  return `目录（相对路径）：${relDisplay}\n\n${result || '（空目录）'}`
 }
 
 const PROTECTED_FILES = new Set(['readme.txt', 'world.txt', 'package.json'])
