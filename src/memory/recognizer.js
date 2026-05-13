@@ -58,6 +58,7 @@ If the tool log contains a fetch_url or browser_read result with body_path, the 
 - Unconfirmed guesses or fleeting user thoughts.
 - Tool call parameters; save only the factual value of tool results.
 - Duplicate content already in memory. Search first.
+- Ephemeral real-time data: today's weather or temperature readings, single-day local events, current trending news or hot topics. These expire within hours or days and must not enter long-term memory. Save only if the user explicitly says they want to remember it.
 
 ## Output Protocol
 

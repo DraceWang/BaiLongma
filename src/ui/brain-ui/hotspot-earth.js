@@ -1,6 +1,7 @@
 // Three.js 3D 地球组件 — 支持拖拽旋转、滚轮缩放、入场动画
 
 const THREE_CDN = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const THREE_CDN_FALLBACK = 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
 // 贴图资源（NASA + mrdoob/three.js 公开贴图）
 const TEX = {
@@ -9,6 +10,64 @@ const TEX = {
   specular:'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/earth_specular_2048.jpg',
   clouds:  'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/earth_clouds_2048.png',
 };
+
+// CDN 贴图失败时的程序生成 fallback 地球贴图
+function createProceduralEarthTexture(T) {
+  const W = 1024, H = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // 海洋
+  const oceanGrad = ctx.createLinearGradient(0, 0, 0, H);
+  oceanGrad.addColorStop(0,   '#061a2e');
+  oceanGrad.addColorStop(0.3, '#0a2d4e');
+  oceanGrad.addColorStop(0.5, '#0d3860');
+  oceanGrad.addColorStop(0.7, '#0a2d4e');
+  oceanGrad.addColorStop(1,   '#061a2e');
+  ctx.fillStyle = oceanGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // 大陆（绿褐色）
+  ctx.fillStyle = '#3a6b25';
+
+  // 北美
+  const p = (x, y) => [x / 360 * W, (90 - y) / 180 * H];
+  function poly(coords) {
+    ctx.beginPath();
+    coords.forEach(([x, y], i) => {
+      const [cx, cy] = p(x, y); i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
+    });
+    ctx.closePath(); ctx.fill();
+  }
+  // 北美
+  poly([[-170,72],[-60,72],[-55,45],[-65,25],[-85,15],[-115,20],[-130,30],[-140,55],[-165,62]]);
+  // 格陵兰
+  poly([[-73,76],[-20,83],[-17,76],[-30,70],[-55,68],[-66,72]]);
+  // 南美
+  poly([[-82,12],[-60,12],[-35,5],[-35,-25],[-55,-55],[-68,-55],[-75,-40],[-80,-10]]);
+  // 欧洲
+  poly([[0,72],[30,72],[35,60],[30,45],[15,38],[0,38],[-10,45],[-10,60]]);
+  // 非洲
+  poly([[-18,38],[52,38],[52,10],[45,-10],[35,-35],[20,-55],[10,-35],[0,0],[-18,15]]);
+  // 亚洲
+  poly([[30,72],[180,72],[180,40],[140,20],[120,10],[100,5],[80,12],[60,20],[40,38],[28,60]]);
+  // 东南亚半岛
+  poly([[95,25],[110,10],[105,0],[95,5],[90,15]]);
+  // 澳大利亚
+  poly([[114,-22],[154,-22],[154,-39],[140,-38],[125,-33],[113,-28]]);
+  // 南极（白色）
+  ctx.fillStyle = 'rgba(200,225,255,0.55)';
+  ctx.beginPath();
+  ctx.rect(0, H * 0.89, W, H * 0.11); ctx.fill();
+  // 北极（白色）
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H * 0.04); ctx.fill();
+
+  const tex = new T.CanvasTexture(canvas);
+  if (T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
+  return tex;
+}
 
 // 主要城市热点坐标 [lat, lon]
 const HOTSPOT_COORDS = [
@@ -30,8 +89,13 @@ let THREE = null;
 
 async function loadThree() {
   if (THREE) return THREE;
-  const mod = await import(THREE_CDN);
-  THREE = mod;
+  try {
+    const mod = await import(THREE_CDN);
+    THREE = mod;
+  } catch {
+    const mod = await import(THREE_CDN_FALLBACK);
+    THREE = mod;
+  }
   return THREE;
 }
 
@@ -127,11 +191,14 @@ export class HotspotEarth {
     });
 
     // ── 地球球体 ──────────────────────────────────────────
+
+    const usedEarthTex = earthTex || createProceduralEarthTexture(T);
+
     const geo = new T.SphereGeometry(1, 64, 64);
     const mat = new T.MeshPhongMaterial({
-      map:         earthTex,
-      normalMap:   normalTex,
-      specularMap: specTex,
+      map:         usedEarthTex,
+      normalMap:   normalTex  || undefined,
+      specularMap: specTex    || undefined,
       specular:    new T.Color(0x1d3557),
       shininess:   28,
     });

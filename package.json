@@ -1,7 +1,7 @@
 {
   "name": "bailongma",
   "productName": "Bailongma",
-  "version": "1.8.175",
+  "version": "1.8.195",
   "description": "A continuously running digital consciousness framework",
   "type": "module",
   "main": "electron/main.cjs",
@@ -61,6 +61,7 @@
       "focus-banner.html",
       "build/icon.ico",
       "sandbox/**/*",
+      "music/**/*",
       "package.json",
       "!**/*.map",
       "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,*.d.ts}",

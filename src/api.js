@@ -12,7 +12,7 @@ import { getQuotaStatus } from './quota.js'
 import { isRunning, stopLoop, startLoop } from './control.js'
 import { buildHeartbeatSystemPromptPreview } from './system-prompt-preview.js'
 import { paths } from './paths.js'
-import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries } from './config.js'
+import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries, getSecurity, setSecurity } from './config.js'
 import { streamTTS, TTS_PROVIDERS, TTS_VOICES } from './voice/tts-providers.js'
 import { restartConnector } from './social/index.js'
 // manager.js (Whisper local server) removed
@@ -41,6 +41,14 @@ const D3_VENDOR_PATH     = path.join(paths.resourcesDir, 'node_modules', 'd3', '
 const SANDBOX_PATH       = paths.sandboxDir
 const DEFAULT_AGENT_NAME = 'Longma'
 const DEFAULT_API_HOST = '127.0.0.1'
+
+// card.action 信号中属于生命周期/系统内部的 action 名，只落库供 injector 被动注入，不推 agent 队列
+const SILENT_CARD_ACTIONS = new Set([
+  'card.dismissed',  // 卡片关闭（组件应改用 acui:dismiss，此处兜底防御）
+  'card.mounted',    // 挂载完成
+  'card.dwell',      // 停留心跳
+  'card.error',      // 渲染错误（已由 card.error type 信号处理）
+])
 
 function getApiHost() {
   return String(globalThis.process?.env?.BAILONGMA_HOST || DEFAULT_API_HOST).trim() || DEFAULT_API_HOST
@@ -796,6 +804,30 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       return
     }
 
+    // GET /settings/security — 读取安全沙箱配置
+    if (req.method === 'GET' && url.pathname === '/settings/security') {
+      if (!hasAllowedAccess(req, url)) return jsonResponse(res, 403, { ok: false, error: 'forbidden' })
+      jsonResponse(res, 200, { ok: true, security: getSecurity() })
+      return
+    }
+
+    // POST /settings/security — 保存安全沙箱配置
+    if (req.method === 'POST' && url.pathname === '/settings/security') {
+      if (!requireLocalOrToken(req, res, url)) return
+      const chunks = []
+      req.on('data', chunk => chunks.push(chunk))
+      req.on('end', () => {
+        try {
+          const updates = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
+          const result = setSecurity(updates)
+          jsonResponse(res, 200, { ok: true, security: result })
+        } catch (err) {
+          jsonResponse(res, 400, { ok: false, error: err.message })
+        }
+      })
+      return
+    }
+
     // GET /settings/social — 读取各平台配置状态（不返回明文 key）
     if (req.method === 'GET' && url.pathname === '/settings/social') {
       jsonResponse(res, 200, { ok: true, social: getSocialConfig() })
@@ -1219,28 +1251,22 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
             ts: msg.ts || Date.now(),
           })
           emitEvent('ui_signal', { id, type: msg.type, target: msg.target, payload: msg.payload })
-          // card.mounted：检查 render_preview，CSS/HTML 泄漏时才通知 agent
-          if (msg.type === 'card.mounted') {
-            const preview = msg.payload?.render_preview || ''
-            if (preview && /font-size|rgba\(|<span|<\/[a-z]|px;|z-index|text-shadow/.test(preview)) {
-              pushMessage('SYSTEM',
-                `[Render anomaly app=${msg.target || 'unknown'}]\nAfter mounting, the component text appears to contain unrendered HTML/CSS. Check the code immediately, then regenerate it with ui_hide + ui_show_inline:\n${preview.slice(0, 200)}`,
-                'APP_SIGNAL')
-            }
-          }
           // card.dismissed：从服务端存活表移除
           if (msg.type === 'card.dismissed') {
             removeActiveUICard(msg.target)
           }
           // 只有用户主动交互（card.action）才推入 agent 队列
-          // card.dismissed 等其他生命周期信号不触发 agent
+          // card.dismissed 等生命周期信号已由 insertUISignal 落库，injector 被动注入即可
           if (msg.type === 'card.action') {
             const appId = msg.target || 'ui'
             const action = msg.payload?.action || 'unknown'
             const payload = msg.payload?.payload || msg.payload || {}
-            // app:saveState 是组件自动上报的状态快照，直接落盘，不触发 agent
             if (action === 'app:saveState') {
+              // 组件自动上报的状态快照：直接落盘，不触发 agent
               persistAppState(appId, payload)
+            } else if (action.startsWith('app:') || SILENT_CARD_ACTIONS.has(action)) {
+              // app: 前缀 = 系统内部信号；SILENT_CARD_ACTIONS = 生命周期信号
+              // 均已由 insertUISignal 写库，injector 下次 tick 被动注入，无需立即触发 agent
             } else {
               const signalContent = `[App信号 app=${appId} action=${action}]\n${JSON.stringify(payload, null, 2)}`
               pushMessage(`APP:${appId}`, signalContent, 'APP_SIGNAL')

@@ -207,13 +207,15 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'exec_command',
-      description: 'Run a shell command inside the sandbox directory. Returns structured JSON with ok, mode, exit_code, stdout, stderr, timed_out, pid, and error. Use background=true for long-running servers; otherwise wait for completion and inspect ok/exit_code before continuing.',
+      description: 'Run a shell command. Returns structured JSON with ok, mode, exit_code, stdout, stderr, timed_out, pid. On Windows runs in PowerShell — use PowerShell syntax (e.g. Get-ChildItem, $env:USERPROFILE, Write-Output). Use background=true for long-running servers. Use cwd to run in a sandbox subdirectory instead of cd-chaining. Use promote_to_background=true so a foreground timeout converts the process to background instead of killing it.',
       parameters: {
         type: 'object',
         properties: {
           command: { type: 'string', description: 'Command to run, such as "node server.js", "npm install", or "python main.py".' },
           background: { type: 'boolean', description: 'Run in the background, default false. Set true when starting a server.' },
-          timeout: { type: 'number', description: 'Foreground execution timeout in seconds, default 30, max 120.' }
+          timeout: { type: 'number', description: 'Foreground execution timeout in seconds, default 30, max 120.' },
+          cwd: { type: 'string', description: 'Subdirectory within the sandbox to run the command in, e.g. "myproject". Avoids cd-chaining. Must be a relative path.' },
+          promote_to_background: { type: 'boolean', description: 'When foreground execution times out, promote to background instead of killing the process. Returns the new pid.' }
         },
         required: ['command']
       }
@@ -239,8 +241,13 @@ export const TOOL_SCHEMAS = {
     type: 'function',
     function: {
       name: 'list_processes',
-      description: 'List current background processes. Returns structured JSON with ok, count, and processes.',
-      parameters: { type: 'object', properties: {} }
+      description: 'List current background processes with their recent output. Returns ok, count, and processes (each with pid, command, started_at, recent_output). Use tail to control how many output lines to include per process (default 20, max 200).',
+      parameters: {
+        type: 'object',
+        properties: {
+          tail: { type: 'number', description: 'Number of recent output lines to return per process, default 20.' }
+        }
+      }
     }
   },
 
@@ -650,7 +657,7 @@ To play music, use media_mode with mode=music and src=file_path to show the reco
     type: 'function',
     function: {
       name: 'ui_show',
-      description: 'Push a visual card to the user interface. Use only when UI expression is clearer or more intuitive than plain text; do not open a card for something one sentence can explain. Available components are in skill.ui memories; currently built in: WeatherCard.',
+      description: 'Push a visual card to the user interface. Use only when UI expression is clearer or more intuitive than plain text; do not open a card for something one sentence can explain. Available components are listed in skill.ui memories.',
       parameters: {
         type: 'object',
         properties: {
@@ -660,7 +667,7 @@ To play music, use media_mode with mode=music and src=file_path to show the reco
             type: 'object',
             description: 'Optional display hint controlling card presentation. All fields have reasonable defaults.',
             properties: {
-              placement: { type: 'string', enum: ['notification', 'center', 'floating'], description: 'notification=top-right stacked slide-in, default; center=centered with overlay for important/confirmation content; floating=free draggable long-lived tool card.' },
+              placement: { type: 'string', enum: ['notification', 'center', 'floating', 'stage'], description: 'notification=top-right stacked slide-in, default; center=centered with overlay for important/confirmation content; floating=free draggable long-lived tool card; stage=fullscreen immersive app.' },
               size:      { description: 'Size: sm | md | lg | xl, or pixel object { w, h }. Default md.', oneOf: [{ type: 'string', enum: ['sm', 'md', 'lg', 'xl'] }, { type: 'object', properties: { w: { type: ['number', 'string'] }, h: { type: ['number', 'string'] } } }] },
               draggable: { type: 'boolean', description: 'Whether draggable. floating defaults true; others default false.' },
               modal:     { type: 'boolean', description: 'Whether to show a translucent overlay. center defaults true.' },
@@ -722,7 +729,7 @@ To play music, use media_mode with mode=music and src=file_path to show the reco
             type: 'object',
             description: 'Optional display hint, same meaning as ui_show hint: placement / size / draggable / modal / enter / exit.',
             properties: {
-              placement: { type: 'string', enum: ['notification', 'center', 'floating'] },
+              placement: { type: 'string', enum: ['notification', 'center', 'floating', 'stage'] },
               size:      { description: 'sm | md | lg | xl, or { w, h }.', oneOf: [{ type: 'string', enum: ['sm', 'md', 'lg', 'xl'] }, { type: 'object' }] },
               draggable: { type: 'boolean' },
               modal:     { type: 'boolean' },

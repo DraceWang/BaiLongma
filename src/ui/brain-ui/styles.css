@@ -245,9 +245,9 @@ body {
   gap: 12px;
   margin-bottom: 14px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  background: color-mix(in srgb, var(--cool) 7%, var(--bg1));
 }
 
 .update-copy {
@@ -1232,6 +1232,47 @@ body {
   font-family: "JetBrains Mono", ui-monospace, monospace;
 }
 .settings-feedback.error { color: var(--warm); }
+
+.settings-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.settings-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.settings-toggle-track {
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--line-strong);
+  position: relative;
+  transition: background 0.2s ease;
+}
+.settings-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink2);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.settings-toggle input:checked + .settings-toggle-track {
+  background: var(--cool);
+}
+.settings-toggle input:checked + .settings-toggle-track::after {
+  transform: translateX(16px);
+  background: var(--bg);
+}
 
 .settings-config-row {
   display: flex;

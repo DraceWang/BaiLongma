@@ -163,6 +163,7 @@ const createSettingsModal = () => `
         <button class="settings-nav-item" data-tab="media" type="button">媒体能力</button>
         <button class="settings-nav-item" data-tab="social" type="button">社交媒体</button>
         <button class="settings-nav-item" data-tab="voice" type="button">语音识别</button>
+        <button class="settings-nav-item" data-tab="security" type="button">安全沙箱</button>
       </nav>
 
       <!-- 内容区 -->
@@ -487,6 +488,46 @@ const createSettingsModal = () => `
           <div class="settings-section settings-section-action">
             <button class="settings-save-btn" id="settings-save-voice" type="button">保存</button>
             <span class="settings-feedback" id="settings-voice-feedback"></span>
+          </div>
+        </div>
+
+        <!-- ── 安全沙箱 tab ── -->
+        <div class="settings-tab" data-tab="security">
+          <div class="settings-section">
+            <div class="settings-section-label">文件沙箱</div>
+            <p class="settings-hint">开启后文件读写只允许在 sandbox/ 目录内。关闭后 Agent 可操作系统任意位置的文件，请谨慎使用。</p>
+            <div class="settings-row">
+              <label class="settings-label" for="security-file-sandbox">启用文件沙箱</label>
+              <label class="settings-toggle">
+                <input type="checkbox" id="security-file-sandbox" checked>
+                <span class="settings-toggle-track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">命令执行沙箱</div>
+            <p class="settings-hint">开启后 exec_command 工作目录锁定在 sandbox/，且禁止使用绝对路径和父目录引用。关闭后命令可访问系统任意目录。</p>
+            <div class="settings-row">
+              <label class="settings-label" for="security-exec-sandbox">启用执行沙箱</label>
+              <label class="settings-toggle">
+                <input type="checkbox" id="security-exec-sandbox" checked>
+                <span class="settings-toggle-track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">工具黑名单</div>
+            <p class="settings-hint">勾选后该工具将被拒绝执行，对话中 Agent 调用时会收到"已被安全策略禁用"错误。</p>
+            <div class="settings-row"><label class="settings-label"><input type="checkbox" class="security-blocked-tool" value="exec_command"> exec_command &nbsp;<span style="color:var(--ink2);font-size:12px;">（执行 shell 命令）</span></label></div>
+            <div class="settings-row"><label class="settings-label"><input type="checkbox" class="security-blocked-tool" value="browser_read"> browser_read &nbsp;<span style="color:var(--ink2);font-size:12px;">（浏览器渲染访问）</span></label></div>
+            <div class="settings-row"><label class="settings-label"><input type="checkbox" class="security-blocked-tool" value="fetch_url"> fetch_url &nbsp;<span style="color:var(--ink2);font-size:12px;">（HTTP 请求）</span></label></div>
+            <div class="settings-row"><label class="settings-label"><input type="checkbox" class="security-blocked-tool" value="web_search"> web_search &nbsp;<span style="color:var(--ink2);font-size:12px;">（网页搜索）</span></label></div>
+            <div class="settings-row"><label class="settings-label"><input type="checkbox" class="security-blocked-tool" value="ui_show_inline"> ui_show_inline &nbsp;<span style="color:var(--ink2);font-size:12px;">（动态 UI 代码注入）</span></label></div>
+            <div class="settings-row"><label class="settings-label"><input type="checkbox" class="security-blocked-tool" value="ui_register"> ui_register &nbsp;<span style="color:var(--ink2);font-size:12px;">（注册新 UI 组件）</span></label></div>
+          </div>
+          <div class="settings-section settings-section-action">
+            <button class="settings-save-btn" id="settings-save-security" type="button">保存</button>
+            <span class="settings-feedback" id="settings-security-feedback"></span>
           </div>
         </div>
 

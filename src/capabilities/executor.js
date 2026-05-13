@@ -6,7 +6,7 @@ import { spawn } from 'child_process'
 import { chromium } from 'playwright'
 import { nowTimestamp } from '../time.js'
 import { searchMemories, searchMemoriesByKeywords, insertMemory, upsertMemoryByMemId, normalizeConversationPartyId, createReminder, findMergeableOneOffReminder, appendReminderTask, listPendingReminders, getReminderById, cancelReminder, upsertPrefetchTask, removePrefetchTask, listPrefetchTasks, insertActionLog, upsertMusicTrack, getMusicTrack, searchMusicLibrary, listMusicLibrary, updateMusicLrc, deleteMusicTrack as dbDeleteMusicTrack } from '../db.js'
-import { emitEvent, emitUICommand, emitACUIEvent, hasACUIClient, addActiveUICard, removeActiveUICard } from '../events.js'
+import { emitEvent, emitUICommand, emitACUIEvent, hasACUIClient, addActiveUICard, removeActiveUICard, getActiveUICards } from '../events.js'
 import { dispatchSocialMessage } from '../social/dispatch.js'
 import { callCapability, listCapabilities } from '../providers/registry.js'
 import { isDailyLimitReached } from '../quota.js'
@@ -16,8 +16,9 @@ import { setPersonCardPanelState, getPersonCardPanelState, getPersonCard } from 
 import { setDocPanelState, getDocPanelState } from '../docs.js'
 import { setUserLocation } from '../weather.js'
 
-// 后台进程注册表：pid → { process, command, startedAt }
+// 后台进程注册表：pid → { process, command, startedAt, outputLines }
 const bgProcesses = new Map()
+const BG_OUTPUT_MAX_LINES = 200
 
 // URL 访问缓存：url → { content, fetchedAt (ms timestamp) }
 // 避免同一 URL 在短时间内被反复请求（如天气每天只需查一次）
@@ -41,6 +42,7 @@ function getUrlTtl(url) {
   return URL_TTL_MS.default
 }
 
+import { config } from '../config.js'
 import { paths } from '../paths.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 文件操作只允许在 sandbox 目录内
@@ -49,6 +51,13 @@ const SANDBOX_ROOT = path.resolve(paths.sandboxDir)
 // inline-script 草稿注册表（内存 + 磁盘双存）
 const draftCodeMap = new Map()   // { scratchId → code }
 const appIdToName  = new Map()   // { scratchId → appName }
+const DRAFT_CODE_MAP_MAX = 50    // 超出后淘汰最旧条目
+function addDraftCode(id, code) {
+  if (draftCodeMap.size >= DRAFT_CODE_MAP_MAX) {
+    draftCodeMap.delete(draftCodeMap.keys().next().value)
+  }
+  draftCodeMap.set(id, code)
+}
 
 // 由 api.js 调用：把 app:saveState 信号的状态自动落盘
 export function persistAppState(componentId, state) {
@@ -108,6 +117,7 @@ function isPathInside(parentDir, candidatePath) {
 }
 
 function assertInSandbox(resolvedPath) {
+  if (config.security?.fileSandbox === false) return
   if (resolvedPath !== SANDBOX_ROOT && !isPathInside(SANDBOX_ROOT, resolvedPath)) {
     throw new Error(`访问被拒绝：文件操作只允许在 sandbox 目录内（${SANDBOX_ROOT}）`)
   }
@@ -226,16 +236,25 @@ function summarizeToolExecution(name, args = {}) {
 function isDangerousShellCommand(command) {
   const text = String(command || '').trim()
   const reasons = []
-  if (/(^|[\s"'`])\.\.([\\/]|$)/.test(text)) reasons.push('command references a parent directory')
-  if (/(^|[\s"'`])[a-z]:[\\/]/i.test(text) || /(^|[\s"'`])[\\/]{2}[^\\/]/.test(text)) reasons.push('command references an absolute filesystem path')
-  if (/(^|[\s"'`])~([\\/]|$)/.test(text) || /\$(home|env:userprofile)\b/i.test(text) || /%userprofile%/i.test(text)) reasons.push('command references the user home directory')
-  if (/\bgit\s+reset\s+--hard\b/i.test(text) || /\bgit\s+clean\b/i.test(text)) reasons.push('command can destructively rewrite the worktree')
+  if (config.security?.execSandbox !== false) {
+    if (/(^|[\s"'`])\.\.([\\/]|$)/.test(text)) reasons.push('command references a parent directory')
+    if (/(^|[\s"'`])[a-z]:[\\/]/i.test(text) || /(^|[\s"'`])[\\/]{2}[^\\/]/.test(text)) reasons.push('command references an absolute filesystem path')
+    if (/(^|[\s"'`])~([\\/]|$)/.test(text) || /\$(home|env:userprofile)\b/i.test(text) || /%userprofile%/i.test(text)) reasons.push('command references the user home directory')
+    if (/\bgit\s+reset\s+--hard\b/i.test(text) || /\bgit\s+clean\b/i.test(text)) reasons.push('command can destructively rewrite the worktree')
+  }
   if (/\b(format|diskpart|shutdown)\b/i.test(text)) reasons.push('command is system-level destructive or disruptive')
+  if (/Remove-Item\b.*-Recurse|-Recurse\b.*Remove-Item/i.test(text)) reasons.push('recursive delete (Remove-Item -Recurse) detected')
+  if (/\brd\s+\/s\b/i.test(text)) reasons.push('recursive directory delete (rd /s) detected')
+  if (/\bInvoke-Expression\b|\biex\s/i.test(text)) reasons.push('dynamic code execution via Invoke-Expression detected')
   return reasons
 }
 
 function evaluateToolPolicy(name, args = {}, context = {}) {
   const risk = classifyTool(name)
+  const blockedTools = config.security?.blockedTools || []
+  if (blockedTools.includes(name)) {
+    return { allowed: false, risk, reason: `工具 "${name}" 已被安全策略禁用` }
+  }
   if (name === 'exec_command') {
     const reasons = isDangerousShellCommand(args.command || args.cmd || '')
     if (reasons.length) return { allowed: false, risk, reason: reasons.join('; ') }
@@ -316,7 +335,7 @@ async function executeToolUnchecked(name, args, context = {}) {
       case 'kill_process':
         return await execKillProcess(args)
       case 'list_processes':
-        return await execListProcesses()
+        return await execListProcesses(args)
       case 'web_search':
         return await execWebSearch(args, context)
       case 'fetch_url':
@@ -822,6 +841,14 @@ async function execMakeDir(args, context = {}) {
   })
 }
 
+function resolveExecCwd(cwdArg) {
+  if (!cwdArg) return config.security?.execSandbox === false ? process.cwd() : SANDBOX_ROOT
+  if (config.security?.execSandbox === false) return path.resolve(process.cwd(), cwdArg)
+  const resolved = path.resolve(SANDBOX_ROOT, cwdArg)
+  assertInSandbox(resolved)
+  return resolved
+}
+
 // exec_command：在沙盒目录内执行 shell 命令
 // background=true 时后台运行，返回 PID；否则等待完成，返回输出
 async function execCommand(args, context = {}) {
@@ -830,17 +857,25 @@ async function execCommand(args, context = {}) {
   if (!command) return toolJson({ ok: false, tool: 'exec_command', error: 'missing command' })
 
   const background = args.background === true || args.background === 'true'
+  const promoteToBackground = args.promote_to_background === true || args.promote_to_background === 'true'
   // schema 说明单位是秒，转换为毫秒；兼容旧调用（如果传入 >1000 视为已是毫秒）
   const rawTimeout = Number(args.timeout) || 30
   const timeoutMs = Math.max(1000, Math.min(rawTimeout < 1000 ? rawTimeout * 1000 : rawTimeout, 120000))
 
-  console.log(`[exec_command] ${background ? '[后台]' : '[前台]'} ${command}`)
-  emitEvent('exec_command', { command, background })
+  let execCwd
+  try {
+    execCwd = resolveExecCwd(args.cwd || '')
+  } catch (err) {
+    return toolJson({ ok: false, tool: 'exec_command', error: err.message })
+  }
+
+  console.log(`[exec_command] ${background ? '[后台]' : '[前台]'} ${command} (cwd: ${execCwd})`)
+  emitEvent('exec_command', { command, background, cwd: execCwd })
 
   if (background) {
-    return execBackground(command)
+    return execBackground(command, execCwd)
   } else {
-    return execForeground(command, timeoutMs, context.signal)
+    return execForeground(command, timeoutMs, context.signal, execCwd, promoteToBackground)
   }
 }
 
@@ -850,13 +885,14 @@ function toolJson(payload) {
 
 function trimCommandOutput(value = '', max = 6000) {
   const text = String(value || '')
-  return text.length > max ? `${text.slice(0, max)}\n\n...` : text
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}\n\n[输出已截断，原始长度 ${text.length} 字符，仅保留前 ${max} 字符]`
 }
 
-function execBackground(command) {
+function execBackground(command, execCwd) {
   const child = spawn(command, {
-    shell: true,
-    cwd: SANDBOX_ROOT,
+    shell: process.platform === 'win32' ? 'powershell.exe' : true,
+    cwd: execCwd,
     detached: false,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -868,12 +904,13 @@ function execBackground(command) {
       tool: 'exec_command',
       mode: 'background',
       command,
-      cwd: SANDBOX_ROOT,
+      cwd: execCwd,
       error: 'process did not start',
     })
   }
   const startedAt = nowTimestamp()
-  bgProcesses.set(pid, { process: child, command, startedAt })
+  const entry = { process: child, command, startedAt, outputLines: [] }
+  bgProcesses.set(pid, entry)
 
   child.on('exit', (code) => {
     console.log(`[exec_command] 后台进程 PID ${pid} 退出，code=${code}`)
@@ -881,34 +918,34 @@ function execBackground(command) {
     emitEvent('process_exit', { pid, command, code })
   })
 
-  // 收集后台进程的输出，发出 SSE 事件
-  child.stdout?.on('data', (data) => {
-    const text = data.toString().slice(0, 500)
-    emitEvent('process_output', { pid, stream: 'stdout', text })
-  })
-  child.stderr?.on('data', (data) => {
-    const text = data.toString().slice(0, 500)
-    emitEvent('process_output', { pid, stream: 'stderr', text })
-  })
+  const pushOutputLine = (stream, data) => {
+    const text = data.toString()
+    entry.outputLines.push({ stream, text, ts: Date.now() })
+    if (entry.outputLines.length > BG_OUTPUT_MAX_LINES) entry.outputLines.shift()
+    emitEvent('process_output', { pid, stream, text: text.slice(0, 500) })
+  }
+
+  child.stdout?.on('data', (data) => pushOutputLine('stdout', data))
+  child.stderr?.on('data', (data) => pushOutputLine('stderr', data))
 
   return toolJson({
     ok: true,
     tool: 'exec_command',
     mode: 'background',
     command,
-    cwd: SANDBOX_ROOT,
+    cwd: execCwd,
     pid,
     started_at: startedAt,
     hint: 'Process is running in the background. Use list_processes to inspect it or kill_process with this pid to stop it.',
   })
 }
 
-function execForeground(command, timeoutMs, signal) {
+function execForeground(command, timeoutMs, signal, execCwd, promoteToBackground = false) {
   return new Promise((resolve) => {
     throwIfAborted(signal)
     const child = spawn(command, {
-      shell: true,
-      cwd: SANDBOX_ROOT,
+      shell: process.platform === 'win32' ? 'powershell.exe' : true,
+      cwd: execCwd,
     })
 
     let stdout = ''
@@ -933,7 +970,7 @@ function execForeground(command, timeoutMs, signal) {
         tool: 'exec_command',
         mode: 'foreground',
         command,
-        cwd: SANDBOX_ROOT,
+        cwd: execCwd,
         aborted: true,
         stdout: trimCommandOutput(stdout),
         stderr: trimCommandOutput(stderr),
@@ -947,7 +984,7 @@ function execForeground(command, timeoutMs, signal) {
         tool: 'exec_command',
         mode: 'foreground',
         command,
-        cwd: SANDBOX_ROOT,
+        cwd: execCwd,
         aborted: true,
         stdout: '',
         stderr: '',
@@ -959,24 +996,68 @@ function execForeground(command, timeoutMs, signal) {
 
     timer = setTimeout(() => {
       timedOut = true
-      child.kill()
-      finish(toolJson({
-        ok: false,
-        tool: 'exec_command',
-        mode: 'foreground',
-        command,
-        cwd: SANDBOX_ROOT,
-        timed_out: true,
-        timeout_ms: timeoutMs,
-        stdout: trimCommandOutput(stdout),
-        stderr: trimCommandOutput(stderr),
-        error: `command timed out after ${timeoutMs / 1000}s`,
-        hint: 'If this is a long-running server, rerun with background=true.',
-      }))
+      if (promoteToBackground && child.pid) {
+        const pid = child.pid
+        const entry = { process: child, command, startedAt: nowTimestamp(), outputLines: [] }
+        bgProcesses.set(pid, entry)
+        child.stdout?.on('data', (data) => {
+          const text = data.toString()
+          entry.outputLines.push({ stream: 'stdout', text, ts: Date.now() })
+          if (entry.outputLines.length > BG_OUTPUT_MAX_LINES) entry.outputLines.shift()
+          emitEvent('process_output', { pid, stream: 'stdout', text: text.slice(0, 500) })
+        })
+        child.stderr?.on('data', (data) => {
+          const text = data.toString()
+          entry.outputLines.push({ stream: 'stderr', text, ts: Date.now() })
+          if (entry.outputLines.length > BG_OUTPUT_MAX_LINES) entry.outputLines.shift()
+          emitEvent('process_output', { pid, stream: 'stderr', text: text.slice(0, 500) })
+        })
+        child.on('exit', (code) => {
+          console.log(`[exec_command] 提升后台进程 PID ${pid} 退出，code=${code}`)
+          bgProcesses.delete(pid)
+          emitEvent('process_exit', { pid, command, code })
+        })
+        finish(toolJson({
+          ok: true,
+          tool: 'exec_command',
+          mode: 'promoted_to_background',
+          command,
+          cwd: execCwd,
+          pid,
+          stdout: trimCommandOutput(stdout),
+          stderr: trimCommandOutput(stderr),
+          hint: `Foreground timed out after ${timeoutMs / 1000}s — process promoted to background with pid ${pid}. Use list_processes to monitor it.`,
+        }))
+      } else {
+        child.kill()
+        finish(toolJson({
+          ok: false,
+          tool: 'exec_command',
+          mode: 'foreground',
+          command,
+          cwd: execCwd,
+          timed_out: true,
+          timeout_ms: timeoutMs,
+          stdout: trimCommandOutput(stdout),
+          stderr: trimCommandOutput(stderr),
+          error: `command timed out after ${timeoutMs / 1000}s`,
+          hint: 'If this is a long-running server, rerun with background=true or set promote_to_background=true.',
+        }))
+      }
     }, timeoutMs)
 
-    child.stdout?.on('data', (d) => { stdout += d.toString() })
-    child.stderr?.on('data', (d) => { stderr += d.toString() })
+    child.stdout?.on('data', (d) => {
+      if (timedOut) return
+      const text = d.toString()
+      stdout += text
+      emitEvent('exec_output', { mode: 'foreground', stream: 'stdout', command, text: text.slice(0, 300) })
+    })
+    child.stderr?.on('data', (d) => {
+      if (timedOut) return
+      const text = d.toString()
+      stderr += text
+      emitEvent('exec_output', { mode: 'foreground', stream: 'stderr', command, text: text.slice(0, 300) })
+    })
 
     child.on('close', (code) => {
       if (timedOut) return
@@ -985,7 +1066,7 @@ function execForeground(command, timeoutMs, signal) {
         tool: 'exec_command',
         mode: 'foreground',
         command,
-        cwd: SANDBOX_ROOT,
+        cwd: execCwd,
         exit_code: code,
         stdout: trimCommandOutput(stdout),
         stderr: trimCommandOutput(stderr),
@@ -1001,7 +1082,7 @@ function execForeground(command, timeoutMs, signal) {
         tool: 'exec_command',
         mode: 'foreground',
         command,
-        cwd: SANDBOX_ROOT,
+        cwd: execCwd,
         stdout: trimCommandOutput(stdout),
         stderr: trimCommandOutput(stderr),
         error: err.message,
@@ -1027,12 +1108,14 @@ async function execKillProcess(args) {
   })
 }
 
-// list_processes：列出当前后台进程
-async function execListProcesses() {
-  const processes = [...bgProcesses.entries()].map(([pid, { command, startedAt }]) => ({
+// list_processes：列出当前后台进程，包含最近输出行
+async function execListProcesses(args = {}) {
+  const tailLines = Math.min(Number(args.tail) || 20, BG_OUTPUT_MAX_LINES)
+  const processes = [...bgProcesses.entries()].map(([pid, { command, startedAt, outputLines }]) => ({
     pid,
     command,
     started_at: startedAt,
+    recent_output: outputLines.slice(-tailLines).map(({ stream, text, ts }) => ({ stream, text, ts })),
   }))
   return toolJson({
     ok: true,
@@ -1345,6 +1428,41 @@ async function searchViaJina(query, limit, signal) {
   }
 }
 
+// web_search 引擎3b：Bing（国内可访问，HTML 解析）
+async function searchViaBing(query, limit, signal) {
+  const searchUrl = `https://cn.bing.com/search?q=${encodeURIComponent(query)}&setlang=zh-CN`
+  const merged = createMergedAbortSignal(signal, 15000)
+  try {
+    const res = await fetch(searchUrl, {
+      headers: { ...WEB_HEADERS, 'Accept-Language': 'zh-CN,zh;q=0.9' },
+      signal: merged?.signal,
+    })
+    merged?.cleanup()
+    if (!res.ok) return null
+    const html = await res.text()
+    const results = []
+    // 匹配 Bing 搜索结果：<h2><a href="...">标题</a></h2> + 摘要
+    const blockRe = /<li[^>]*class="[^"]*b_algo[^"]*"[^>]*>([\s\S]*?)<\/li>/g
+    let m
+    while ((m = blockRe.exec(html)) !== null && results.length < limit) {
+      const block = m[1]
+      const hrefMatch = block.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([^<]+)<\/a>/)
+      const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/)
+      if (!hrefMatch) continue
+      const url = hrefMatch[1]
+      const title = hrefMatch[2].replace(/<[^>]+>/g, '').trim()
+      const snippet = (snippetMatch?.[1] || '').replace(/<[^>]+>/g, '').trim().slice(0, 300)
+      if (title && url) results.push({ title, url, snippet })
+    }
+    if (results.length === 0) return null
+    return { results, source: 'bing' }
+  } catch (err) {
+    merged?.cleanup()
+    if (err.name === 'AbortError') throw err
+    return null
+  }
+}
+
 // web_search 引擎4：DuckDuckGo HTML（最后兜底，不稳定）
 async function searchViaDDG(query, limit, signal) {
   const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`
@@ -1380,8 +1498,8 @@ async function execWebSearch(args, context = {}) {
 
   console.log(`[web_search] ${query}`)
 
-  // 依次尝试：Serper → SearXNG → Jina Search（免费）→ DuckDuckGo（兜底）
-  const engines = [searchViaSerper, searchViaSearXNG, searchViaJina, searchViaDDG]
+  // 依次尝试：Serper → SearXNG → Bing（国内可访问）→ Jina Search → DuckDuckGo（兜底）
+  const engines = [searchViaSerper, searchViaSearXNG, searchViaBing, searchViaJina, searchViaDDG]
   let lastErr = null
   for (const engine of engines) {
     throwIfAborted(context.signal)
@@ -1751,7 +1869,7 @@ async function execSpeak(args) {
   fs.writeFileSync(resolved, result.buffer)
 
   const relPath = `audio/${fname}`
-  emitEvent('audio_created', { path: relPath, text: text.slice(0, 60) })
+  emitEvent('audio_created', { path: relPath, text: text.slice(0, 60), autoPlay: true })
   console.log(`[speak] 已生成: ${relPath}`)
   return `语音已生成：${relPath}（时长约 ${result.duration ?? '?'} 秒）`
 }
@@ -2321,6 +2439,7 @@ function execUIShow({ component, props, hint }) {
 
 function execUIHide({ id }) {
   if (!id) return '错误：未提供 id'
+  if (!getActiveUICards().find(c => c.id === id)) return `错误：卡片 "${id}" 不存在或已关闭`
   if (!hasACUIClient()) return '错误：当前没有 UI 客户端连接'
   emitUICommand({ op: 'unmount', id })
   removeActiveUICard(id)
@@ -2331,6 +2450,15 @@ function execUIHide({ id }) {
 function execUIUpdate({ id, props }) {
   if (!id) return '错误：未提供 id'
   if (!props || typeof props !== 'object' || Array.isArray(props)) return '错误：props 必须为对象'
+  const card = getActiveUICards().find(c => c.id === id)
+  if (!card) return `错误：卡片 "${id}" 不存在或已关闭`
+  if (card.component && card.component !== 'inline-template' && card.component !== 'inline-script') {
+    const def = loadACUIComponents()[card.component]
+    if (def) {
+      const propsErr = validateProps(def.propsSchema, props)
+      if (propsErr) return `错误：props 校验失败 — ${propsErr}`
+    }
+  }
   if (!hasACUIClient()) return '错误：当前没有 UI 客户端连接'
   emitUICommand({ op: 'update', id, props })
   emitEvent('action', { tool: 'ui_update', summary: `更新卡片`, detail: id })
@@ -2379,7 +2507,7 @@ function execUIShowInline({ mode, template, styles, code, props, hint }) {
 
   // inline-script 草稿自动落盘，供 manage_app(save) 和服务重启后恢复
   if (mode === 'inline-script') {
-    draftCodeMap.set(id, code)
+    addDraftCode(id, code)
     try {
       const draftDir = path.resolve(SANDBOX_ROOT, 'apps', '.drafts')
       fs.mkdirSync(draftDir, { recursive: true })
@@ -2402,6 +2530,7 @@ function execUIShowInline({ mode, template, styles, code, props, hint }) {
 function execUIPatch({ id, op, data }) {
   if (!id) return '错误：未提供 id'
   if (!op) return '错误：未提供 op'
+  if (!getActiveUICards().find(c => c.id === id)) return `错误：卡片 "${id}" 不存在或已关闭`
   if (!hasACUIClient()) return '错误：当前没有 UI 客户端连接'
   emitUICommand({ op: 'patch', id, patchOp: op, data: data || {} })
   emitEvent('action', { tool: 'ui_patch', summary: `应用补丁 ${op}`, detail: id })
@@ -2426,18 +2555,20 @@ function execManageApp({ action, name, label, draft_id, state, hint }) {
     // 版本备份（若已有同名应用）
     const componentPath = path.resolve(appDir, 'component.js')
     const metaPath = path.resolve(appDir, 'meta.json')
+    let newVersion = 1
     if (fs.existsSync(componentPath) && fs.existsSync(metaPath)) {
       try {
         const oldMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
         const v = oldMeta.version || 1
         fs.copyFileSync(componentPath, path.resolve(appDir, `component.v${v}.js`))
+        newVersion = v + 1
       } catch (_) {}
     }
     const meta = {
       name, label: label || name,
       created_at: new Date().toISOString(),
       last_used: new Date().toISOString(),
-      version: 2,
+      version: newVersion,
       draft_id,
       hint: hint || { placement: 'floating', size: 'lg' },
     }
@@ -2445,6 +2576,7 @@ function execManageApp({ action, name, label, draft_id, state, hint }) {
     fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
     if (state) fs.writeFileSync(path.resolve(appDir, 'state.json'), JSON.stringify(state, null, 2), 'utf-8')
     appIdToName.set(draft_id, name)
+    draftCodeMap.delete(draft_id)
     emitEvent('action', { tool: 'manage_app', summary: `保存应用 ${name}`, detail: draft_id })
     return JSON.stringify({ ok: true, name, path: `sandbox/apps/${name}/` })
   }
@@ -2470,7 +2602,7 @@ function execManageApp({ action, name, label, draft_id, state, hint }) {
         meta.last_used = new Date().toISOString()
         fs.writeFileSync(path.resolve(appDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8')
       }
-    } catch (_) {}
+    } catch (e) { console.warn(`[manage_app open] 解析挂载结果失败：${e.message}`) }
     emitEvent('action', { tool: 'manage_app', summary: `打开应用 ${name}`, detail: name })
     return result
   }

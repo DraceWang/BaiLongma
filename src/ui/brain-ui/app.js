@@ -1250,6 +1250,7 @@ function handle({ type, data = {} }) {
       break;
     case "startup_self_check_started":
       playJarvisStartupSound();
+      setTimeout(() => playTTSReply("系统启动，正在进行自检"), 1500);
       break;
     default:
       break;
@@ -1621,6 +1622,7 @@ window.addEventListener("beforeunload", () => {
       const tab = btn.dataset.tab;
       overlay.querySelector(`.settings-tab[data-tab="${tab}"]`)?.classList.add("active");
       if (tab === "social") loadSocialSettings();
+      if (tab === "security") loadSecuritySettings();
     });
   });
 
@@ -1743,6 +1745,54 @@ window.addEventListener("beforeunload", () => {
         }
       }
     } catch {}
+  }
+
+  // ── 安全沙箱 ──
+  const fileSandboxToggle = document.getElementById("security-file-sandbox");
+  const execSandboxToggle = document.getElementById("security-exec-sandbox");
+  const saveSecurityBtn   = document.getElementById("settings-save-security");
+  const securityFeedback  = document.getElementById("settings-security-feedback");
+
+  async function loadSecuritySettings() {
+    try {
+      const { security } = await fetch(`${API}/settings/security`).then(r => r.json());
+      if (fileSandboxToggle) fileSandboxToggle.checked = security.fileSandbox !== false;
+      if (execSandboxToggle) execSandboxToggle.checked = security.execSandbox !== false;
+      document.querySelectorAll(".security-blocked-tool").forEach(cb => {
+        cb.checked = (security.blockedTools || []).includes(cb.value);
+      });
+    } catch {}
+  }
+
+  if (saveSecurityBtn) {
+    saveSecurityBtn.addEventListener("click", async () => {
+      const blockedTools = [...document.querySelectorAll(".security-blocked-tool")]
+        .filter(cb => cb.checked)
+        .map(cb => cb.value);
+      const body = {
+        fileSandbox: fileSandboxToggle ? fileSandboxToggle.checked : true,
+        execSandbox: execSandboxToggle ? execSandboxToggle.checked : true,
+        blockedTools,
+      };
+      saveSecurityBtn.disabled = true;
+      try {
+        const res = await fetch(`${API}/settings/security`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showFeedback(securityFeedback, "已保存，立即生效");
+        } else {
+          showFeedback(securityFeedback, data.error || "保存失败", true);
+        }
+      } catch {
+        showFeedback(securityFeedback, "请求失败", true);
+      } finally {
+        saveSecurityBtn.disabled = false;
+      }
+    });
   }
 
   if (saveSocialBtn) {

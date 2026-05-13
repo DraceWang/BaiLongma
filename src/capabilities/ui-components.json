@@ -31,5 +31,34 @@
     },
     "placement": "stage",
     "size": "xl"
+  },
+  "SelfCheckCard": {
+    "propsSchema": {
+      "results": { "type": "array",  "required": true },
+      "overall": { "type": "string", "required": false }
+    },
+    "enter": "slide-from-right",
+    "exit":  "slide-to-right"
+  },
+  "SelfCheckStepCard": {
+    "propsSchema": {
+      "step":  { "type": "number", "required": true },
+      "total": { "type": "number", "required": false },
+      "name":  { "type": "string", "required": true },
+      "icon":  { "type": "string", "required": false }
+    },
+    "enter": "slide-from-right",
+    "exit":  "slide-to-right"
+  },
+  "AwakeningCard": {
+    "propsSchema": {
+      "index":   { "type": "number", "required": true },
+      "total":   { "type": "number", "required": false },
+      "title":   { "type": "string", "required": true },
+      "finding": { "type": "string", "required": false },
+      "emoji":   { "type": "string", "required": false }
+    },
+    "enter": "slide-from-right",
+    "exit":  "slide-to-right"
   }
 }

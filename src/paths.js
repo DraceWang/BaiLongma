@@ -76,3 +76,22 @@ export function seedSandboxOnce() {
     console.warn('[paths] 沙盒种子文件拷贝失败:', err.message)
   }
 }
+
+// 首次启动时，把仓库附带的种子音乐文件拷到 musicDir，
+// 确保自检时 music scan 能扫到至少一首曲目而无需 yt-dlp 下载。
+export function seedMusicOnce() {
+  const srcDir = path.join(RESOURCES_DIR, 'music')
+  const dstDir = paths.musicDir
+  if (srcDir === dstDir) return
+  if (!fs.existsSync(srcDir)) return
+  try {
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      const dstPath = path.join(dstDir, entry.name)
+      if (fs.existsSync(dstPath)) continue
+      fs.copyFileSync(path.join(srcDir, entry.name), dstPath)
+    }
+  } catch (err) {
+    console.warn('[paths] 音乐种子文件拷贝失败:', err.message)
+  }
+}

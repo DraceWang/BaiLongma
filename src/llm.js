@@ -349,11 +349,11 @@ function shouldPersistActionLog(toolName) {
 }
 
 const TOOL_LOOP_LIMITS = {
-  maxRounds: 10,
-  maxTotalCalls: 16,
-  maxHighRiskCalls: 4,
+  maxRounds: 100,
   maxConsecutiveFailures: 3,
   maxSameFailures: 2,
+  loopWindowSize: 8,
+  loopUniqueThreshold: 2,
 }
 
 const HIGH_RISK_TOOLS = new Set([
@@ -417,26 +417,26 @@ function isToolFailure(result) {
 
 function createToolLoopState() {
   return {
-    totalCalls: 0,
-    highRiskCalls: 0,
     consecutiveFailures: 0,
     sameFailureCounts: new Map(),
+    recentFingerprints: [],
   }
 }
 
 function getToolLoopStopReason(state, name, fingerprint) {
-  if (state.totalCalls >= TOOL_LOOP_LIMITS.maxTotalCalls) {
-    return `total tool-call budget reached (${TOOL_LOOP_LIMITS.maxTotalCalls})`
-  }
-  if (isHighRiskTool(name) && state.highRiskCalls >= TOOL_LOOP_LIMITS.maxHighRiskCalls) {
-    return `high-risk tool-call budget reached (${TOOL_LOOP_LIMITS.maxHighRiskCalls})`
-  }
   if (state.consecutiveFailures >= TOOL_LOOP_LIMITS.maxConsecutiveFailures) {
     return `too many consecutive tool failures (${TOOL_LOOP_LIMITS.maxConsecutiveFailures})`
   }
   const sameFailures = state.sameFailureCounts.get(fingerprint) || 0
   if (sameFailures >= TOOL_LOOP_LIMITS.maxSameFailures) {
     return `same failing action repeated ${sameFailures} times`
+  }
+  const window = state.recentFingerprints.slice(-TOOL_LOOP_LIMITS.loopWindowSize)
+  if (window.length >= TOOL_LOOP_LIMITS.loopWindowSize) {
+    const unique = new Set(window).size
+    if (unique <= TOOL_LOOP_LIMITS.loopUniqueThreshold) {
+      return `stuck in a loop (only ${unique} unique action(s) in last ${TOOL_LOOP_LIMITS.loopWindowSize} calls)`
+    }
   }
   return null
 }
@@ -452,8 +452,7 @@ function makeToolLoopStoppedResult(name, reason) {
 }
 
 function recordToolLoopOutcome(state, name, fingerprint, result) {
-  state.totalCalls += 1
-  if (isHighRiskTool(name)) state.highRiskCalls += 1
+  state.recentFingerprints.push(fingerprint)
 
   if (isToolFailure(result)) {
     state.consecutiveFailures += 1
