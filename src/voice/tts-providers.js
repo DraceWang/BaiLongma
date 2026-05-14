@@ -1,17 +1,33 @@
 // 流式 TTS 服务商接入层
-// 支持: OpenAI TTS / ElevenLabs / 火山引擎 / 豆包（方舟）
+// 支持: Edge TTS / OpenAI TTS / ElevenLabs / 火山引擎 / 豆包（方舟）
 // 统一返回 Node.js Readable stream，供 api.js pipe 到 HTTP 响应
 import { Readable, Transform } from 'stream'
+import crypto from 'crypto'
 
 export const TTS_PROVIDERS = [
-  { id: 'doubao',      label: '豆包（方舟）',   streaming: true  },
-  { id: 'minimax',     label: 'MiniMax',       streaming: false },
-  { id: 'openai',      label: 'OpenAI TTS',   streaming: true  },
-  { id: 'elevenlabs',  label: 'ElevenLabs',   streaming: true  },
-  { id: 'volcano',     label: '火山引擎',       streaming: false },
+  { id: 'edge',        label: 'Edge TTS（免费）', streaming: false, noKey: true },
+  { id: 'doubao',      label: '豆包（方舟）',     streaming: true  },
+  { id: 'minimax',     label: 'MiniMax',         streaming: false },
+  { id: 'openai',      label: 'OpenAI TTS',      streaming: true  },
+  { id: 'elevenlabs',  label: 'ElevenLabs',      streaming: true  },
+  { id: 'volcano',     label: '火山引擎',         streaming: false },
 ]
 
 export const TTS_VOICES = {
+  edge: [
+    { id: 'zh-CN-XiaoxiaoNeural',  label: '晓晓（女声，自然）' },
+    { id: 'zh-CN-XiaoyiNeural',    label: '晓依（女声，温暖）' },
+    { id: 'zh-CN-YunxiNeural',     label: '云希（男声，自然）' },
+    { id: 'zh-CN-YunjianNeural',   label: '云健（男声，沉稳）' },
+    { id: 'zh-CN-YunyangNeural',   label: '云扬（男声，新闻播报）' },
+    { id: 'zh-CN-XiaohanNeural',   label: '晓涵（女声，成熟）' },
+    { id: 'zh-CN-XiaomoNeural',    label: '晓梦（女声，甜美女声）' },
+    { id: 'zh-CN-XiaoruiNeural',   label: '晓瑞（女声，知性）' },
+    { id: 'zh-CN-XiaoshuangNeural', label: '晓双（女声，儿童音）' },
+    { id: 'zh-CN-XiaoxuanNeural',  label: '晓萱（女声，亲切）' },
+    { id: 'zh-CN-YunfengNeural',   label: '云枫（男声，叙事）' },
+    { id: 'zh-CN-YunhaoNeural',    label: '云皓（男声，对话）' },
+  ],
   doubao: [
     { id: 'zh_female_xiaohe_uranus_bigtts',          label: '小何 2.0（女声，通用）' },
     { id: 'zh_female_vv_uranus_bigtts',              label: 'Vivi 2.0（女声，通用/多语种）' },
@@ -275,10 +291,60 @@ async function streamVolcano({ text, voiceId = 'BV001_streaming', appId, token }
   return Readable.from([buf])
 }
 
+// ── Edge TTS（微软免费 TTS，利用 Edge 浏览器在线朗读 API，无需 API Key）────────
+// 通过 WebSocket 获取 Sec-MS-MPC token，再用 HTTP POST 请求合成音频
+const EDGE_TTS_WSS = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1'
+const EDGE_TTS_TRUSTED = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
+
+async function getEdgeTtsToken() {
+  const date = new Date().toString()
+  const id = crypto.randomUUID()
+  return crypto.createHash('sha256')
+    .update(`M:${id}Z:${date}E:trout`).digest('base64')
+}
+
+async function streamEdgeTTS({ text, voiceId }) {
+  const voice = voiceId || 'zh-CN-XiaoxiaoNeural'
+  const token = await getEdgeTtsToken()
+
+  const resp = await fetch(
+    `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${EDGE_TTS_TRUSTED}&ConnectionId=${token}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/ssml+xml',
+        'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+        'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      body: `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>
+        <voice name='${voice}'>${escapeXml(text)}</voice></speak>`,
+    }
+  )
+
+  if (!resp.ok) throw new Error(`Edge TTS 失败 (${resp.status})`)
+
+  const buf = Buffer.from(await resp.arrayBuffer())
+  // 响应头部包含二进制元数据（约44字节），音频数据以 ID3 或 0xFF 0xFB 开头
+  const mp3Start = buf.indexOf(Buffer.from([0xFF, 0xFB]))
+  if (mp3Start === -1) {
+    // 某些情况下以 ID3 tag 开头
+    const id3Start = buf.indexOf(Buffer.from([0x49, 0x44, 0x33]))
+    return Readable.from([id3Start >= 0 ? buf.slice(id3Start) : buf])
+  }
+  return Readable.from([buf.slice(mp3Start)])
+}
+
+function escapeXml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
 // ── 通用入口 ────────────────────────────────────────────────────────────────
 export async function streamTTS({ text, provider, voiceId, keys = {} }) {
   if (!text?.trim()) throw new Error('TTS: 文本为空')
   switch (provider) {
+    case 'edge':
+      return streamEdgeTTS({ text, voiceId })
     case 'doubao':
       return streamDoubao({
         text,

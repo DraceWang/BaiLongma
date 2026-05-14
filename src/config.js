@@ -688,7 +688,7 @@ export function getTTSCredentials() {
   let stored = {}
   try { stored = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))?.tts || {} } catch {}
   return {
-    provider:       stored.ttsProvider  || 'minimax',
+    provider:       stored.ttsProvider  || 'edge',
     voiceId:        stored.ttsVoiceId   || '',
     doubaoKey:      stored.doubaoKey    || process.env.DOUBAO_TTS_API_KEY || '',
     doubaoAppId:    stored.doubaoAppId  || process.env.DOUBAO_TTS_APP_ID || '',

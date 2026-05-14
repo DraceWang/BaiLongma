@@ -1245,6 +1245,11 @@ function handle({ type, data = {} }) {
         audioEl.play().catch(() => {});
       }
       break;
+    case "music_created":
+      if (data.path) {
+        handleMediaCommand({ mode: "music", action: "show", src: `${API}/${data.path}`, title: data.prompt || "AI 生成音乐" });
+      }
+      break;
     case "tts_reply":
       if (data.text) playTTSReply(data.text);
       break;
@@ -1328,14 +1333,29 @@ let ttsAudioEl = null;
 
 // 供 voice-panel 打断检测调用：停止当前 TTS 播放（不恢复 ASR，由调用方负责）
 window.stopTTS = () => {
-  if (!ttsAudioEl) return;
-  ttsAudioEl.pause();
-  try { URL.revokeObjectURL(ttsAudioEl.src); } catch {}
-  ttsAudioEl = null;
+  if (ttsAudioEl) { ttsAudioEl.pause(); ttsAudioEl = null; }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
 };
 
 async function playTTSReply(text) {
+  if (!text) return;
   try {
+    window.bailongmaVoice?.suspendForTTS?.();
+
+    // 优先使用浏览器内置语音合成（无需 API key，同"叮"音效一样是本地能力）
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = "zh-CN";
+      utt.rate = 1;
+      utt.pitch = 1;
+      utt.onend = () => { window.bailongmaVoice?.resumeAfterMedia?.(); };
+      utt.onerror = () => { window.bailongmaVoice?.resumeAfterMedia?.(); };
+      window.speechSynthesis.speak(utt);
+      return;
+    }
+
+    // 降级：浏览器不支持 speechSynthesis 时走 Edge TTS（免费，无需 API key）
     const resp = await fetch(`${API}/tts/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1350,22 +1370,20 @@ async function playTTSReply(text) {
     const url = URL.createObjectURL(blob);
     if (ttsAudioEl) { ttsAudioEl.pause(); URL.revokeObjectURL(ttsAudioEl.src); }
     ttsAudioEl = new Audio(url);
-    // 停掉云端 ASR，但保持 mic 硬件开着以便打断检测
-    window.bailongmaVoice?.suspendForTTS?.();
     ttsAudioEl.onended = () => {
       URL.revokeObjectURL(url);
       ttsAudioEl = null;
-      window.bailongmaVoice?.resumeAfterMedia();
+      window.bailongmaVoice?.resumeAfterMedia?.();
     };
     ttsAudioEl.onerror = () => {
       ttsAudioEl = null;
-      window.bailongmaVoice?.resumeAfterMedia();
+      window.bailongmaVoice?.resumeAfterMedia?.();
     };
     ttsAudioEl.play().catch(() => {
-      window.bailongmaVoice?.resumeAfterMedia();
+      window.bailongmaVoice?.resumeAfterMedia?.();
     });
   } catch {
-    window.bailongmaVoice?.resumeAfterMedia();
+    window.bailongmaVoice?.resumeAfterMedia?.();
   }
 }
 
@@ -1538,39 +1556,17 @@ function initTTSSettings() {
     });
   }
 
-  // 试听按钮：先保存当前服务商+声音选择，再触发合成
+  // 试听按钮：使用浏览器本地语音合成，无需 API key
   if (testBtn) {
     testBtn.addEventListener("click", async () => {
       testBtn.disabled = true;
-      if (testStatus) testStatus.textContent = "保存配置中…";
+      if (testStatus) testStatus.textContent = "播放中…";
       try {
-        // 先把当前 UI 的服务商+声音写入后端，确保试听用的是当前选择
-        const preBody = { ttsProvider: providerSel.value };
-        const currentVoice = voiceSel?.value?.trim();
-        if (currentVoice) preBody.ttsVoiceId = currentVoice;
-        const minimaxKey2 = document.getElementById("tts-minimax-key")?.value?.trim();
-        if (minimaxKey2) preBody.minimaxKey = minimaxKey2;
-        const doubaoKey = document.getElementById("tts-doubao-key")?.value?.trim();
-        if (doubaoKey) preBody.doubaoKey = doubaoKey;
-        const openaiKey = document.getElementById("tts-openai-key")?.value?.trim();
-        if (openaiKey) preBody.openaiTtsKey = openaiKey;
-        const elevenKey = document.getElementById("tts-elevenlabs-key")?.value?.trim();
-        if (elevenKey) preBody.elevenLabsKey = elevenKey;
-        const volcanoAppId = document.getElementById("tts-volcano-appid")?.value?.trim();
-        if (volcanoAppId) preBody.volcanoAppId = volcanoAppId;
-        const volcanoToken = document.getElementById("tts-volcano-token")?.value?.trim();
-        if (volcanoToken) preBody.volcanoToken = volcanoToken;
-        await fetch(`${API}/settings/tts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(preBody),
-        });
-        if (testStatus) testStatus.textContent = "合成中…";
         await playTTSReply("你好，这是语音合成测试，声音是否清晰自然？");
         if (testStatus) testStatus.textContent = "播放中";
         setTimeout(() => { if (testStatus) testStatus.textContent = ""; }, 4000);
       } catch {
-        if (testStatus) testStatus.textContent = "失败，请检查配置和 API Key";
+        if (testStatus) testStatus.textContent = "播放失败，浏览器可能不支持语音合成";
       } finally {
         testBtn.disabled = false;
       }
