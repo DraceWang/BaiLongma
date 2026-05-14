@@ -48,9 +48,10 @@ const STATE_CFG = {
 };
 
 // ─── 打断检测参数 ───
-const BARGEIN_WARMUP_MS  = 600  // TTS 开始后前 600ms 不检测（等 AEC 适应）
-const BARGEIN_FRAMES     = 8    // 需要连续 8 帧高振幅（约 130ms）才触发
-const BARGEIN_THRESHOLD  = 0.09 // 振幅阈值（高于环境噪声和 AEC 残留）
+const BARGEIN_WARMUP_MS  = 800  // TTS 开始后前 800ms 不检测（等 AEC 适应）
+const BARGEIN_FRAMES     = 10   // 需要连续 10 帧高振幅（约 165ms）才触发
+const BARGEIN_THRESHOLD  = 0.11 // 振幅阈值（高于环境噪声和 AEC 残留）
+const BARGEIN_MIN_FREQ_BIN = 4  // 忽略低频 bin（< ~500Hz），过滤 TTS 回声残留
 // 4096 samples @ 16kHz = 256ms/块；保留 1500ms ≈ 6 块
 const BARGEIN_PRE_BUFFER_MS   = 1500
 const BARGEIN_MAX_CHUNKS      = Math.ceil(BARGEIN_PRE_BUFFER_MS * 16000 / 1000 / 4096)
@@ -146,8 +147,12 @@ export function initVoicePanel({
 
     if (micData) {
       micData.analyser.getByteFrequencyData(micData.dataArray);
-      const sum = micData.dataArray.reduce((a, b) => a + b, 0);
-      const vol = (sum / micData.dataArray.length) / 255;
+      // TTS 播放时跳过低频 bin（AEC 残余集中在低频），平时用全频
+      const skipBins = suspendedByMedia ? BARGEIN_MIN_FREQ_BIN : 0;
+      const arr = micData.dataArray;
+      let sum = 0;
+      for (let i = skipBins; i < arr.length; i++) sum += arr[i];
+      const vol = (sum / (arr.length - skipBins)) / 255;
 
       // 打断检测：TTS 播放中持续检测用户声音
       if (suspendedByMedia) {
