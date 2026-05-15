@@ -1330,17 +1330,30 @@ function playJarvisStartupSound() {
 
 // ── TTS 语音回复播放 ──────────────────────────────────────────────────────────
 let ttsAudioEl = null;
+let ttsSpeaking = false; // TTS 是否正在发声
+let ttsActiveUntil = 0;  // TTS 发声结束时刻 + 回声冷却期（供 voice-panel 打断检测判断）
 
 // 供 voice-panel 打断检测调用：停止当前 TTS 播放（不恢复 ASR，由调用方负责）
 window.stopTTS = () => {
   if (ttsAudioEl) { ttsAudioEl.pause(); ttsAudioEl = null; }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
+  ttsSpeaking = false;
+  ttsActiveUntil = Date.now() + 500;
 };
+window.ttsSpeaking = () => ttsSpeaking;
+// 供 voice-panel 判断是否在 TTS 活跃期（含回声冷却 500ms）
+window.ttsActiveUntil = () => ttsActiveUntil;
+
+let ttsResumeTimer = null;
+function clearTTSResumeTimer() {
+  if (ttsResumeTimer) { clearInterval(ttsResumeTimer); ttsResumeTimer = null; }
+}
 
 async function playTTSReply(text) {
   if (!text) return;
   try {
     window.bailongmaVoice?.suspendForTTS?.();
+    ttsSpeaking = true;
 
     // 优先使用浏览器内置语音合成（无需 API key，同"叮"音效一样是本地能力）
     if (window.speechSynthesis) {
@@ -1349,9 +1362,26 @@ async function playTTSReply(text) {
       utt.lang = "zh-CN";
       utt.rate = 1;
       utt.pitch = 1;
-      utt.onend = () => { window.bailongmaVoice?.resumeAfterMedia?.(); };
-      utt.onerror = () => { window.bailongmaVoice?.resumeAfterMedia?.(); };
+      const finish = () => {
+        ttsSpeaking = false;
+        ttsActiveUntil = Date.now() + 500;
+        clearTTSResumeTimer();
+        window.bailongmaVoice?.resumeAfterMedia?.();
+      };
+      utt.onend = finish;
+      utt.onerror = finish;
       window.speechSynthesis.speak(utt);
+      // Chrome 长文本暂停修复：每 10s 检查并恢复被暂停的语音
+      clearTTSResumeTimer();
+      ttsResumeTimer = setInterval(() => {
+        if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+          // 已真正播放完毕
+          ttsSpeaking = false;
+          ttsActiveUntil = Date.now() + 500;
+          clearTTSResumeTimer();
+          window.speechSynthesis.resume();
+        }
+      }, 10000);
       return;
     }
 
@@ -1373,16 +1403,24 @@ async function playTTSReply(text) {
     ttsAudioEl.onended = () => {
       URL.revokeObjectURL(url);
       ttsAudioEl = null;
+      ttsSpeaking = false;
+      ttsActiveUntil = Date.now() + 500;
       window.bailongmaVoice?.resumeAfterMedia?.();
     };
     ttsAudioEl.onerror = () => {
       ttsAudioEl = null;
+      ttsSpeaking = false;
+      ttsActiveUntil = Date.now() + 500;
       window.bailongmaVoice?.resumeAfterMedia?.();
     };
     ttsAudioEl.play().catch(() => {
+      ttsSpeaking = false;
+      ttsActiveUntil = Date.now() + 500;
       window.bailongmaVoice?.resumeAfterMedia?.();
     });
   } catch {
+    ttsSpeaking = false;
+    ttsActiveUntil = Date.now() + 500;
     window.bailongmaVoice?.resumeAfterMedia?.();
   }
 }

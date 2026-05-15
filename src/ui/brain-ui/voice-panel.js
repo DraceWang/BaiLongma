@@ -156,8 +156,11 @@ export function initVoicePanel({
 
       // 打断检测：TTS 播放中持续检测用户声音
       if (suspendedByMedia) {
+        // TTS 处于静默间隙（句子间停顿或 Chrome 暂停 bug）或回声冷却期内，不触发打断
+        const activeUntil = typeof window.ttsActiveUntil === 'function' ? window.ttsActiveUntil() : Date.now() + 500;
+        const inTTSPhase = Date.now() < activeUntil;
         const aecReady = Date.now() - ttsStartTime > BARGEIN_WARMUP_MS;
-        if (aecReady && vol > BARGEIN_THRESHOLD) {
+        if (inTTSPhase && aecReady && vol > BARGEIN_THRESHOLD) {
           if (++bargeinFrames >= BARGEIN_FRAMES) {
             bargeinFrames = 0;
             window.stopTTS?.();
